@@ -1,0 +1,10 @@
+# Secrets: never commit these
+.env
+.env.*
+!.env.example
+
+# Installed packages and generated files
+node_modules/
+coverage/
+*.log
+.DS_Store
