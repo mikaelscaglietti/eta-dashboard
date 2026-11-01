@@ -4,7 +4,8 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { hashPassword } from '../src/auth.ts';
 
-const MIN_PASSWORD_LENGTH = 12;
+// Lowered for local testing at the owner's request. Raise before going live.
+const MIN_PASSWORD_LENGTH = 8;
 
 const lines = createInterface({ input: process.stdin })[Symbol.asyncIterator]();
 async function ask(question: string): Promise<string> {
