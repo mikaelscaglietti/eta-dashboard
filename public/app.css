@@ -157,6 +157,7 @@ ol.time time{color:var(--muted);font-size:13px;display:block}
 .conn small{display:block;color:var(--muted)}
 /* email preview (always light, like a real inbox) */
 .emailframe{background:#fff;color:#111;border:1px solid var(--line);border-radius:10px;padding:20px;font:16px/1.45 var(--font);overflow:hidden}
+.emailframe table{min-width:0}
 .emailframe .logo{text-align:center;font-size:20px;letter-spacing:.18em;font-weight:300;padding-bottom:14px;border-bottom:1px solid #e5e5e5;margin-bottom:14px}
 .emailframe ul{margin:8px 0 12px 18px;padding:0}
 .emailframe .photos{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:10px 0}

@@ -273,7 +273,8 @@ async function sendTexts(db: Db, services: Services, store: any, settings: any, 
       [lead.id, target.to, target.audience, target.body, status],
     );
   }
-  await event(db, lead.id, testMode ? `Test mode: ${sent} text sent to you only` : `Text sent to ${sent} recipient${sent === 1 ? '' : 's'}`);
+  const noun = `${sent} text${sent === 1 ? '' : 's'}`;
+  await event(db, lead.id, testMode ? `Test mode: ${noun} sent to you only` : `${noun} sent`);
 }
 
 // Runs once at startup, before any new work: a lead still marked 'sending' at
