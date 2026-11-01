@@ -28,9 +28,10 @@ function refusedPassthrough(address: string): string {
   return '';
 }
 
+const PREVIEW_PHOTO = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 120"><rect width="160" height="120" fill="#d7dde6"/></svg>')}`;
 const SAMPLE_LEAD = { firstName: 'Alex', year: 2027, make: 'Cadillac', model: 'Escalade', trim: 'V-Series 4dr 4x4', vin: '1GYS9HK92VR133820', stock: 'C27099', leadType: 'New Vehicle (VIN)' };
 
-export function registerApi(app: FastifyInstance, db: Db, services: Services) {
+export function registerApi(app: FastifyInstance, db: Db, services: Services, dev: boolean) {
   // Everything the screens show, in one request. Keys never appear here.
   app.get('/api/state', async () => {
     const [dealers, templates, leads, events, texts, alerts, cache, settings] = await Promise.all([
@@ -45,7 +46,7 @@ export function registerApi(app: FastifyInstance, db: Db, services: Services) {
       db.query('SELECT * FROM vehicle_cache ORDER BY last_scraped DESC'),
       db.query('SELECT * FROM settings'),
     ]);
-    return { dealers, templates, leads, events, texts, alerts, cache, settings: settings[0] };
+    return { dealers, templates, leads, events, texts, alerts, cache, settings: settings[0], dev };
   });
 
   app.post('/api/dealerships', async (request, reply) => {
@@ -91,14 +92,14 @@ export function registerApi(app: FastifyInstance, db: Db, services: Services) {
   });
 
   app.post<{ Params: { id: string }; Body: { active?: boolean; test?: boolean } }>('/api/dealerships/:id/flags', async (request) => {
-    const { active, test } = request.body;
+    const { active, test } = request.body as { active?: boolean; test?: boolean };
     if (typeof active === 'boolean') await db.query('UPDATE dealerships SET active = $2 WHERE id = $1', [request.params.id, active]);
     if (typeof test === 'boolean') await db.query('UPDATE dealerships SET test_mode = $2 WHERE id = $1', [request.params.id, test]);
     return { ok: true };
   });
 
   app.put<{ Params: { id: string }; Body: any }>('/api/templates/:id', async (request) => {
-    const t = request.body;
+    const t = request.body as any;
     await db.query(
       `UPDATE templates SET reasons=$2, buttons=$3, logo_url=$4, building_photo_url=$5, links=$6 WHERE dealership_id=$1`,
       [request.params.id, t.reasons ?? '', t.buttons ?? '', t.logoUrl ?? '', t.buildingPhotoUrl ?? '', t.links ?? ''],
@@ -108,17 +109,18 @@ export function registerApi(app: FastifyInstance, db: Db, services: Services) {
 
   // The preview uses the same builder as real emails, so it can't drift from them.
   app.post<{ Body: any }>('/api/templates/preview', async (request) => {
-    const { dealerId, template, sample } = request.body;
+    const { dealerId, template, sample } = request.body as any;
     const [s] = await db.query('SELECT * FROM dealerships WHERE id = $1', [dealerId]);
     if (!s) return { html: '' };
     const store = { name: s.name, website: s.website, salesPhone: s.sales_phone, servicePhone: s.service_phone, address: s.address };
     const lead = sample === 'fallback' ? { ...SAMPLE_LEAD, vin: '', stock: '', leadType: 'New Vehicle' } : SAMPLE_LEAD;
-    const photo = 'data:,';
-    return { html: buildReply(store, template, lead, sample === 'fallback' ? [] : [photo]).html };
+    const photo = 'https://preview.invalid/photo.jpg';
+    const { html } = buildReply(store, template, lead, sample === 'fallback' ? [] : [photo, photo, photo]);
+    return { html: html.replaceAll(photo, PREVIEW_PHOTO) };
   });
 
   app.post<{ Body: { sending: boolean } }>('/api/sending', async (request) => {
-    const on = Boolean(request.body.sending);
+    const on = Boolean((request.body as { sending: boolean }).sending);
     await db.query('UPDATE settings SET sending = $1', [on]);
     return { ok: true };
   });
@@ -135,7 +137,8 @@ export function registerApi(app: FastifyInstance, db: Db, services: Services) {
     );
     if (!lead) return reply.code(409).send({ error: 'This lead already has a reply.' });
     await answerLead(db, services, lead.id);
-    return { ok: true };
+    const [result] = await db.query('SELECT status, failure FROM responses WHERE lead_id = $1', [lead.id]);
+    return result;
   });
 
   app.post<{ Params: { id: string } }>('/api/alerts/:id/dismiss', async (request) => {
@@ -160,7 +163,7 @@ export function registerApi(app: FastifyInstance, db: Db, services: Services) {
   });
 
   app.put<{ Body: any }>('/api/settings', async (request) => {
-    const s = request.body;
+    const s = request.body as any;
     await db.query(
       `UPDATE settings SET customer_texts=$1, owner_test_email=$2, owner_test_phone=$3, model_enabled=$4,
          model_provider=$5, model_id=$6, model_timeout_seconds=$7, photo_timeout_seconds=$8`,

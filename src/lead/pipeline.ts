@@ -276,9 +276,15 @@ async function sendTexts(db: Db, services: Services, store: any, settings: any, 
   await event(db, lead.id, testMode ? `Test mode: ${sent} text sent to you only` : `Text sent to ${sent} recipient${sent === 1 ? '' : 's'}`);
 }
 
-// Runs at startup and on a timer: finishes queued leads and any cut off by a restart.
-export async function resumeLeads(db: Db, services: Services): Promise<void> {
+// Runs once at startup, before any new work: a lead still marked 'sending' at
+// that moment can only have been cut off. Running this later would catch leads
+// that are simply in progress and risk a second reply.
+export async function recoverInterrupted(db: Db): Promise<void> {
   await db.query(`UPDATE leads SET state = 'resume' WHERE state = 'sending'`);
+}
+
+// Runs on a timer: finishes queued leads and any recovered after a restart.
+export async function resumeLeads(db: Db, services: Services): Promise<void> {
   const pending = await db.query(`SELECT id FROM leads WHERE state IN ('queued', 'resume') ORDER BY received_at`);
   for (const { id } of pending) await answerLead(db, services, id);
 }

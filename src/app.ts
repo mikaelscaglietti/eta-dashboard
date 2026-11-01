@@ -4,14 +4,21 @@ import formbody from '@fastify/formbody';
 import rateLimit from '@fastify/rate-limit';
 import { timingSafeEqual } from 'node:crypto';
 import { SESSION_COOKIE, SESSION_HOURS, createSession, isValidSession, verifyPassword } from './auth.ts';
+import { readFile } from 'node:fs/promises';
+import { registerApi } from './api.ts';
 import type { Config } from './config.ts';
-import { homePage, loginPage } from './pages.ts';
+import { openDb } from './db.ts';
+import type { Db } from './db.ts';
+import { receiveEmail } from './lead/pipeline.ts';
+import type { Services } from './lead/pipeline.ts';
+import { loginPage } from './pages.ts';
+import { notConnected, simulated } from './services.ts';
 
 const PUBLIC_PATHS = new Set(['/health', '/login']);
 
 const SECURITY_HEADERS = {
   'Content-Security-Policy':
-    "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    "default-src 'none'; script-src 'self'; connect-src 'self'; img-src https: data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
   'Cache-Control': 'no-store',
@@ -23,7 +30,12 @@ function sameText(a: string, b: string): boolean {
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
-export async function buildApp(config: Config, options: { logger?: boolean } = {}) {
+const publicFile = (name: string) => readFile(new URL(`../public/${name}`, import.meta.url), 'utf8');
+
+export async function buildApp(
+  config: Config,
+  options: { logger?: boolean; db?: Db; services?: Services } = {},
+) {
   // trustProxy: the host's front door passes on each visitor's real address,
   // which the sign-in attempt limit depends on.
   const app = Fastify({ logger: options.logger ?? false, trustProxy: true });
@@ -82,7 +94,47 @@ export async function buildApp(config: Config, options: { logger?: boolean } = {
     return reply.redirect('/login', 303);
   });
 
-  app.get('/', async (_request, reply) => reply.type('text/html').send(homePage()));
+  const db = options.db ?? (await openDb());
+  const services = options.services ?? notConnected;
+  registerApi(app, db, services, !config.production);
+
+  app.get('/', async (_request, reply) => reply.type('text/html').send(await publicFile('index.html')));
+  app.get('/app.js', async (_request, reply) => reply.type('text/javascript').send(await publicFile('app.js')));
+  app.get('/app.css', async (_request, reply) => reply.type('text/css').send(await publicFile('app.css')));
+
+  // Only exists on your computer: runs the spec's sample through the real steps.
+  if (!config.production) {
+    app.post('/api/dev/sample-lead', async () => {
+      let [store] = await db.query(`SELECT id FROM dealerships WHERE name = 'Earnhardt Cadillac'`);
+      if (!store) {
+        [store] = await db.query(
+          `INSERT INTO dealerships (name, website, mailbox, crm, passthrough, sales_phone, service_phone, address, google_status)
+           VALUES ('Earnhardt Cadillac', 'earnhardtcadillac.com', 'earnhardtcadillac@etarsp.com', 'Elead',
+             'sales@earnhardtcadillac.edealerhub.com', '480-269-0992', '480-483-4000',
+             '7901 East Frank Lloyd Wright Boulevard, Scottsdale, AZ 85260', 'ok') RETURNING id`,
+        );
+        await db.query(
+          `INSERT INTO templates (dealership_id, reasons) VALUES ($1, $2)`,
+          [store.id, 'We offer the most competitive prices around.\nComplete the entire buying process online plus free home delivery.\nComplimentary loaner vehicles\nFree concierge service\nCadillac roadside service\nFamily owned and operated since 1951'],
+        );
+      }
+      await db.query(`UPDATE settings SET owner_test_email = 'test-inbox@example.com' WHERE owner_test_email = ''`);
+      const deal = String(70000000 + Math.floor(Math.random() * 9999999));
+      const id = await receiveEmail(db, simulated, store.id, {
+        from: 'notify@eleadnotify.com',
+        subject: `Deal IN: ${deal}  New Customer 1GYS9HK92VR133820`,
+        body: '<> Earnhardt Cadillac Vehicle wanted: 2027 Cadillac Escalade Name: Alex Sample City: SAMPLE CITY Phone: (555) 555-0100 E-Mail: alex@example.com Trim: V-Series 4dr 4x4 Comments: Unlock Inquiry - Roadster Online; 2027 Cadillac Escalade-V V-Series - #C27099 - 1GYS9HK92VR133820; https://dealers.roadster.com/earnhardtcadillac/customers/12345678? utm_medium=eLead&utm_source=crm <>',
+        messageId: `<${deal}@eleadnotify.com>`,
+        threadId: deal,
+        receivedAt: new Date(),
+      });
+      return { id };
+    });
+  }
+
+  app.addHook('onClose', async () => {
+    if (!options.db) await db.close();
+  });
 
   return app;
 }

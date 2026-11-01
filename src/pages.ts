@@ -29,10 +29,6 @@ h1{font-size:24px;letter-spacing:.04em;text-transform:uppercase;margin:0 0 4px;f
 .field label{font-weight:600;font-size:14px}
 .field input{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%}
 .banner{background:var(--bad-bg);color:var(--bad);border:1px solid var(--bad);border-radius:10px;padding:10px 14px;margin-bottom:16px;font-weight:500}
-.app{display:grid;grid-template-columns:240px minmax(0,1fr);min-height:100vh}
-.side{background:var(--side);color:var(--side-ink);padding:18px 14px;display:flex;flex-direction:column;justify-content:space-between}
-main{padding:28px clamp(16px,3vw,40px) 60px}
-@media (max-width:820px){.app{grid-template-columns:1fr}.side{gap:12px}}
 `;
 
 function page(title: string, body: string): string {
@@ -62,17 +58,4 @@ export function loginPage(failed = false): string {
     <button class="btn primary" type="submit">Sign in</button>
   </form>
 </div></div>`);
-}
-
-export function homePage(): string {
-  return page('ETA Dashboard', `<div class="app">
-  <aside class="side">
-    <div class="brand">ETA DASHBOARD</div>
-    <form method="post" action="/logout"><button class="btn" type="submit">Sign out</button></form>
-  </aside>
-  <main>
-    <h1>Setup in progress</h1>
-    <p class="sub">You’re signed in. The dashboard screens arrive in the next build steps.</p>
-  </main>
-</div>`);
 }

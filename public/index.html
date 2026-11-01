@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ETA Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<div class="app">
+  <aside class="side" id="side">
+    <div class="brand">ETA DASHBOARD</div>
+    <nav id="nav"></nav>
+    <div class="send" id="send"></div>
+    <form class="foot" method="post" action="/logout"><button class="btn sm" type="submit">Sign out</button></form>
+  </aside>
+  <main id="view"></main>
+</div>
+<div id="toast" class="toast" hidden></div>
+<div id="modal" class="modal" hidden></div>
+</body>
+</html>

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../src/db.ts';
 import type { Db } from '../src/db.ts';
 import { ELEAD_SENDER, parseElead } from '../src/lead/parseElead.ts';
-import { assertSafeRecipient, answerLead, receiveEmail, resumeLeads } from '../src/lead/pipeline.ts';
+import { assertSafeRecipient, answerLead, receiveEmail, recoverInterrupted, resumeLeads } from '../src/lead/pipeline.ts';
 import type { InboundEmail, OutboundEmail, Services } from '../src/lead/pipeline.ts';
 import { buildReply, replySubject } from '../src/lead/replyEmail.ts';
 
@@ -240,9 +240,19 @@ describe('safety rules', () => {
     await receiveEmail(db, fakeServices({ sendEmail: async () => { throw new Error('stop'); } }).services, storeId, sample());
     await db.query(`DELETE FROM responses`);
     await db.query(`UPDATE leads SET state = 'sending'`);
+    await recoverInterrupted(db);
     await resumeLeads(db, services);
     expect(emails).toHaveLength(0);
     expect((await db.query('SELECT state FROM leads'))[0].state).toBe('done');
+  });
+
+  it('leaves a lead alone while it is still being worked on', async () => {
+    const { emails, services } = fakeServices();
+    await receiveEmail(db, fakeServices({ sendEmail: async () => { throw new Error('stop'); } }).services, storeId, sample());
+    await db.query(`UPDATE leads SET state = 'sending'`);
+    await resumeLeads(db, services);
+    expect(emails).toHaveLength(0);
+    expect((await db.query('SELECT state FROM leads'))[0].state).toBe('sending');
   });
 
   it('does not text a number that opted out', async () => {
