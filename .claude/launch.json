@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "eta-dashboard",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--env-file-if-exists=.env", "src/server.ts"],
       "port": 3000
     }
   ]
