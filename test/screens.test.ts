@@ -1,0 +1,117 @@
+// @vitest-environment node
+import { readFileSync } from 'node:fs';
+import { JSDOM, VirtualConsole } from 'jsdom';
+import { describe, expect, it } from 'vitest';
+import { buildApp } from '../src/app.ts';
+import { SESSION_COOKIE, createSession, hashPassword } from '../src/auth.ts';
+
+const secret = 's'.repeat(40);
+const config = { ownerEmail: 'o@example.com', ownerPasswordHash: hashPassword('x'), sessionSecret: secret, port: 3000, production: false };
+
+async function openDashboard() {
+  const app = await buildApp(config);
+  const errors: string[] = [];
+  const virtualConsole = new VirtualConsole();
+  virtualConsole.on('jsdomError', (e) => errors.push(String(e)));
+  const html = readFileSync('public/index.html', 'utf8').replace(/<script.*<\/script>/, '').replace(/<link[^>]*>/g, '');
+  const dom = new JSDOM(html, { url: 'http://localhost/', runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole });
+  const w = dom.window as any;
+  w.Element.prototype.scrollIntoView = () => {};
+  w.fetch = async (url: string, init: any = {}) => {
+    const response = await app.inject({
+      url, method: init.method ?? 'GET', headers: init.headers ?? {}, payload: init.body,
+      cookies: { [SESSION_COOKIE]: createSession(secret) },
+    });
+    return { ok: response.statusCode < 400, redirected: false, json: async () => response.json() };
+  };
+  w.addEventListener('error', (e: any) => errors.push(e.message));
+  w.addEventListener('unhandledrejection', (e: any) => errors.push(String(e.reason)));
+  w.eval(readFileSync('public/app.js', 'utf8'));
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 60));
+  await settle();
+  return { w, errors, settle, close: async () => { w.close(); await app.close(); } };
+}
+
+const go = async (s: any, hash: string) => { s.w.location.hash = hash; await s.settle(); };
+const title = (s: any) => s.w.document.querySelector('#view h1')?.textContent;
+
+describe('dashboard screens', () => {
+  it('shows the menu in the order the spec asks for', async () => {
+    const s = await openDashboard();
+    const labels = [...s.w.document.querySelectorAll('nav a')].map((a: any) => a.textContent);
+    expect(labels).toEqual(['Incoming leads', 'Response log', 'Dealerships', 'Deactivated', 'Templates', 'Vehicle cache', 'Settings', 'Alerts']);
+    await s.close();
+  });
+
+  it('opens every screen, empty and with a lead, without errors', async () => {
+    const s = await openDashboard();
+    const screens: [string, string][] = [
+      ['leads', 'Incoming leads'], ['log', 'Response log'], ['dealerships', 'Dealerships'], ['deactivated', 'Deactivated'],
+      ['dealership-new', 'Add dealership'], ['templates', 'Templates'], ['cache', 'Vehicle cache'], ['controls', 'Settings'], ['alerts', 'Alerts'],
+    ];
+    for (const [hash, heading] of screens) {
+      await go(s, hash);
+      expect(title(s)).toBe(heading);
+    }
+
+    await go(s, 'leads');
+    s.w.document.querySelector('#sim').click();
+    await s.settle();
+    await s.settle();
+    expect(s.w.document.querySelector('.count b').textContent).toBe('1');
+    expect(s.w.document.querySelector('tbody').textContent).toContain('2027 Cadillac Escalade');
+
+    for (const [hash, heading] of screens) {
+      await go(s, hash);
+      expect(title(s)).toBe(heading);
+    }
+    await go(s, 'lead-1');
+    expect(title(s)).toContain('Alex');
+    expect(s.w.document.querySelector('#view').textContent).toContain('Test mode: reply sent to you only');
+    expect(s.w.document.querySelector('.emailframe').textContent).toContain('Hi Alex,');
+    await go(s, 'dealership-1');
+    expect(title(s)).toBe('Earnhardt Cadillac');
+
+    await go(s, 'log');
+    s.w.document.querySelector('[data-preview]').click();
+    expect(s.w.document.querySelector('#modal').hidden).toBe(false);
+    expect(s.w.document.querySelector('#pv-t').textContent).toBe('Response preview');
+
+    expect(s.errors).toEqual([]);
+    await s.close();
+  });
+
+  it('pauses after a confirmation and shows the banner on every screen', async () => {
+    const s = await openDashboard();
+    s.w.document.querySelector('#pausebtn').click();
+    expect(s.w.document.querySelector('#dt').textContent).toContain('Pause sending');
+    s.w.document.querySelector('#mp').click();
+    await s.settle();
+    for (const hash of ['leads', 'templates', 'controls']) {
+      await go(s, hash);
+      expect(s.w.document.querySelector('#view .banner').textContent).toContain('Sending is paused');
+    }
+    expect(s.w.document.querySelector('#send b').textContent).toBe('Paused');
+    expect(s.errors).toEqual([]);
+    await s.close();
+  });
+
+  it('adds a dealership in test mode and shows form errors', async () => {
+    const s = await openDashboard();
+    await go(s, 'dealership-new');
+    s.w.document.querySelector('#adddealer').click();
+    await s.settle();
+    expect(s.w.document.querySelector('[data-f="name"] .err-msg').textContent).toContain('Enter the dealership name');
+    const set = (id: string, value: string) => { s.w.document.querySelector('#' + id).value = value; };
+    set('name', 'Test Store'); set('mailbox', 'a@b.co'); set('passthrough', 's@b.co');
+    s.w.document.querySelector('#crm').value = 'Elead';
+    s.w.document.querySelector('#adddealer').click();
+    await s.settle();
+    await s.settle();
+    expect(title(s)).toBe('Test Store');
+    await go(s, 'dealerships');
+    expect(s.w.document.querySelector('tbody').textContent).toContain('Test mode');
+    expect(s.errors).toEqual([]);
+    await s.close();
+  });
+});
