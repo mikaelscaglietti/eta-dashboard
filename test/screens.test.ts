@@ -96,6 +96,23 @@ describe('dashboard screens', () => {
     await s.close();
   });
 
+  it('puts a Connect button next to the notification mailbox', async () => {
+    const s = await openDashboard();
+    const button = () => s.w.document.querySelector('[data-f="mailbox"] .inl [data-google]');
+    await go(s, 'dealership-new');
+    expect(button().textContent).toBe('Connect');
+    button().click();
+    expect(s.w.document.querySelector('#gg').textContent).toContain('Google isn’t set up yet');
+    await go(s, 'leads');
+    s.w.document.querySelector('#sim').click();
+    await s.settle();
+    await s.settle();
+    await go(s, 'dealership-1');
+    expect(button().textContent).toBe('Reconnect');
+    expect(s.errors).toEqual([]);
+    await s.close();
+  });
+
   it('adds a dealership in test mode and shows form errors', async () => {
     const s = await openDashboard();
     await go(s, 'dealership-new');

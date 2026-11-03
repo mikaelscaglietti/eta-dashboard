@@ -135,13 +135,15 @@ function viewDeactivated() {
  <div class="tablewrap"><table><thead><tr><th>Dealership</th><th>Notification mailbox</th><th>CRM passthrough</th><th></th></tr></thead><tbody>
  ${off.map(d => `<tr class="click" tabindex="0" data-go="dealership-${d.id}"><td><b>${esc(d.name)}</b></td><td>${d.mailbox ? esc(d.mailbox) : '<span class="muted">Not set</span>'}</td><td>${d.passthrough ? esc(d.passthrough) : '<span class="muted">None</span>'}</td><td><button class="btn sm" data-react="${d.id}">Reactivate</button></td></tr>`).join('')}</tbody></table>${off.length ? '' : '<div class="empty">No deactivated dealerships. Stores you deactivate will appear here.</div>'}</div>`;
 }
-const field = (id, label, ph, hint, wide) => `<div class="field ${wide ? 'full' : ''}" data-f="${id}"><label for="${id}">${label}</label><input id="${id}" placeholder="${ph}" autocomplete="off">${hint ? `<small>${hint}</small>` : ''}<span class="err-msg"></span></div>`;
+const connectBtn = label => `<button class="btn" type="button" data-google>${label}</button>`;
+const withBtn = (input, btn) => btn ? `<div class="inl">${input}${btn}</div>` : input;
+const field = (id, label, ph, hint, wide, btn) => `<div class="field ${wide ? 'full' : ''}" data-f="${id}"><label for="${id}">${label}</label>${withBtn(`<input id="${id}" placeholder="${ph}" autocomplete="off">`, btn)}${hint ? `<small>${hint}</small>` : ''}<span class="err-msg"></span></div>`;
 function viewDealerNew() {
   return `<a class="back" href="#dealerships">Back to dealerships</a><div class="head"><div><h1>Add dealership</h1><p class="sub">New dealerships start in test mode, so nothing goes to the CRM or staff until you switch the store live.</p></div><button class="btn primary" id="adddealer">Add dealership</button></div>
  <div class="panel"><div class="form">
   ${field('name', 'Dealership name', 'Earnhardt Cadillac', 'Used in every email and text.')}
   ${field('site', 'Website', 'yourstore.com', 'Where the app looks up vehicle photos.')}
-  ${field('mailbox', 'Notification mailbox', 'leads@yourstore.com', 'The Google Workspace inbox where this store’s lead notifications arrive. Connect it with Google after adding the store.')}
+  ${field('mailbox', 'Notification mailbox', 'leads@yourstore.com', 'The Google Workspace inbox where this store’s lead notifications arrive. Press Connect to sign in with Google.', false, connectBtn('Connect'))}
   <div class="field" data-f="crm"><label for="crm">CRM (required)</label><select id="crm"><option value="">Select a CRM</option>${CRMS.map(c => `<option>${esc(c)}</option>`).join('')}</select><span class="err-msg"></span></div>
   ${field('passthrough', 'CRM passthrough address (required)', 'sales@yourstore.edealerhub.com', 'Replies go here so the CRM logs them. Never notify@eleadnotify.com.', true)}
   ${field('sales', 'Sales phone', '480-555-0100')}${field('service', 'Service phone', '480-555-0101')}
@@ -152,11 +154,11 @@ function viewDealerNew() {
 function viewDealer(id) {
   const d = dealers.find(x => x.id === id); if (!d) return '<p>Not found.</p>';
   const googleText = d.google === 'ok' ? 'Connected. The app can read and send from this mailbox.' : d.google === 'new' ? 'Not connected yet. Connect Google so the app can read and send from this mailbox.' : 'Sign-in expired. Reconnect to resume replies.';
-  const val = (i, label, v, hint, wide) => `<div class="field ${wide ? 'full' : ''}" data-f="${i}"><label for="${i}">${label}</label><input id="${i}" value="${esc(v)}">${hint ? `<small>${hint}</small>` : ''}<span class="err-msg"></span></div>`;
+  const val = (i, label, v, hint, wide, btn) => `<div class="field ${wide ? 'full' : ''}" data-f="${i}"><label for="${i}">${label}</label>${withBtn(`<input id="${i}" value="${esc(v)}">`, btn)}${hint ? `<small>${hint}</small>` : ''}<span class="err-msg"></span></div>`;
   return `<a class="back" href="${d.active ? '#dealerships' : '#deactivated'}">${d.active ? 'Back to dealerships' : 'Back to deactivated'}</a><div class="head"><div><h1>${esc(d.name)}</h1><p class="sub">Changes here also update the email template, so the dealership name only lives in one place.</p></div><button class="btn primary" id="savedealer" data-id="${d.id}">Save changes</button></div>
  <div class="panel"><div class="form">
   ${val('name', 'Dealership name', d.name, 'Used in every email and text.')}${val('site', 'Website', d.site)}
-  ${val('mailbox', 'Notification mailbox', d.mailbox, 'The Google Workspace inbox where lead notifications arrive.')}
+  ${val('mailbox', 'Notification mailbox', d.mailbox, 'The Google Workspace inbox where lead notifications arrive.', false, connectBtn(d.google === 'new' ? 'Connect' : 'Reconnect'))}
   <div class="field"><label for="crm">CRM</label><select id="crm"><option value="">Select a CRM</option>${options(CRMS.map(c => [c, c]), d.crm)}</select><small>The system that receives replies at the passthrough address.</small></div>
   ${val('passthrough', 'CRM passthrough address (required)', d.passthrough, 'Replies go here so the CRM logs them. The app never sends to notify@eleadnotify.com.', true)}
   ${val('sales', 'Sales phone', d.sales)}${val('service', 'Service phone', d.service)}${val('address', 'Address', d.address, '', true)}
