@@ -3,15 +3,23 @@ import { buildApp } from './app.ts';
 import { loadConfig } from './config.ts';
 import { openDb } from './db.ts';
 import { recoverInterrupted, resumeLeads } from './lead/pipeline.ts';
+import type { Services } from './lead/pipeline.ts';
 import { notConnected } from './services.ts';
+import { twilioSender } from './sms.ts';
 
 const config = loadConfig(process.env);
 if (!process.env.DATABASE_URL) mkdirSync('.data', { recursive: true });
 const db = await openDb(process.env.DATABASE_URL, '.data/local');
-const app = await buildApp(config, { logger: true, db, services: notConnected });
+
+// Each outside service is switched on only once its settings are filled in.
+const services: Services = {
+  ...notConnected,
+  ...(config.twilio ? { sendText: twilioSender(config.twilio) } : {}),
+};
+const app = await buildApp(config, { logger: true, db, services });
 
 // Finishes anything a restart interrupted, then keeps checking for queued leads.
-const pass = () => resumeLeads(db, notConnected).catch((error) => app.log.error(error));
+const pass = () => resumeLeads(db, services).catch((error) => app.log.error(error));
 await recoverInterrupted(db);
 await pass();
 const timer = setInterval(pass, 5000);

@@ -1,6 +1,7 @@
 import type { Db } from '../db.ts';
 import { ELEAD_SENDER, looksLikeLead, parseElead } from './parseElead.ts';
 import { NON_VEHICLE_TYPES, buildReply, replySubject } from './replyEmail.ts';
+import { normalizePhone } from '../sms.ts';
 
 export interface InboundEmail {
   from: string;
@@ -28,7 +29,8 @@ export interface Services {
   sendEmail(mailbox: string, email: OutboundEmail): Promise<void>;
   // After a crash mid-send: did this reply already leave?
   wasSent(mailbox: string, threadId: string, to: string): Promise<boolean>;
-  sendText(to: string, body: string): Promise<void>;
+  // Returns the text service's message ID when it has one.
+  sendText(to: string, body: string): Promise<string | void>;
   findPhotos(website: string, vin: string): Promise<{ photos: string[]; pageUrl: string }>;
   writeGreeting(lead: { firstName: string; vehicle: string }): Promise<string>;
 }
@@ -257,24 +259,48 @@ async function sendTexts(db: Db, services: Services, store: any, settings: any, 
   if (!testMode && settings.customer_texts && lead.phone) {
     targets.push({ to: lead.phone, audience: 'customer', body: `Hi ${lead.first_name}, thanks for contacting ${store.name}. Reply STOP to opt out.` });
   }
-  const optedOut = new Set((await db.query('SELECT phone FROM opt_outs')).map((row) => row.phone));
+  const optedOut = new Set((await db.query('SELECT phone FROM opt_outs')).map((row) => normalizePhone(row.phone)));
   let sent = 0;
+  let failed = 0;
   for (const target of targets) {
-    if (optedOut.has(target.to)) continue;
+    const to = normalizePhone(target.to);
     let status = 'sent';
-    try {
-      await services.sendText(target.to, target.body);
-      sent += 1;
-    } catch {
+    let failure = '';
+    let sid = '';
+    if (!to) {
       status = 'failed';
+      failure = 'Not a valid phone number';
+    } else if (optedOut.has(to)) {
+      // Never text a number that replied STOP. Logged so you can see why.
+      status = 'opted out';
+    } else {
+      try {
+        sid = String((await services.sendText(to, target.body)) ?? '');
+        sent += 1;
+      } catch (error) {
+        status = 'failed';
+        failure = (error as Error).message;
+      }
     }
+    if (status === 'failed') failed += 1;
     await db.query(
-      'INSERT INTO text_messages (lead_id, recipient, audience, body, status) VALUES ($1, $2, $3, $4, $5)',
-      [lead.id, target.to, target.audience, target.body, status],
+      'INSERT INTO text_messages (lead_id, recipient, audience, body, status, twilio_sid, failure) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+      [lead.id, to || target.to, target.audience, target.body, status, sid, failure],
     );
   }
   const noun = `${sent} text${sent === 1 ? '' : 's'}`;
   await event(db, lead.id, testMode ? `Test mode: ${noun} sent to you only` : `${noun} sent`);
+  if (failed) {
+    await event(db, lead.id, `${failed} text${failed === 1 ? '' : 's'} could not be sent`, 'warn');
+    await raiseAlert(db, {
+      dealershipId: store.id,
+      severity: 'fallback',
+      title: `Text failed: ${store.name}`,
+      body: 'A lead text could not be sent. Open the lead to see why, and check the staff phone numbers.',
+      link: `#dealership-${store.id}`,
+      cta: 'Check numbers',
+    });
+  }
 }
 
 // Runs once at startup, before any new work: a lead still marked 'sending' at

@@ -13,8 +13,10 @@ import { receiveEmail } from './lead/pipeline.ts';
 import type { Services } from './lead/pipeline.ts';
 import { loginPage } from './pages.ts';
 import { notConnected, simulated } from './services.ts';
+import { lastFour } from './sms.ts';
+import { TWILIO_PATHS, registerTwilio } from './twilioRoutes.ts';
 
-const PUBLIC_PATHS = new Set(['/health', '/login']);
+const PUBLIC_PATHS = new Set(['/health', '/login', ...TWILIO_PATHS]);
 
 const SECURITY_HEADERS = {
   'Content-Security-Policy':
@@ -96,7 +98,10 @@ export async function buildApp(
 
   const db = options.db ?? (await openDb());
   const services = options.services ?? notConnected;
-  registerApi(app, db, services, !config.production);
+  registerApi(app, db, services, !config.production, {
+    twilio: config.twilio ? { connected: true, from: lastFour(config.twilio.from) } : { connected: false, from: '' },
+  });
+  registerTwilio(app, db, config.twilio);
 
   app.get('/', async (_request, reply) => reply.type('text/html').send(await publicFile('index.html')));
   app.get('/app.js', async (_request, reply) => reply.type('text/javascript').send(await publicFile('app.js')));

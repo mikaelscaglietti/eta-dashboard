@@ -89,6 +89,10 @@ CREATE TABLE IF NOT EXISTS text_messages (
   sent_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   status TEXT NOT NULL
 );
+-- Added for Twilio: its message ID links delivery updates back to the text.
+ALTER TABLE text_messages ADD COLUMN IF NOT EXISTS twilio_sid TEXT NOT NULL DEFAULT '';
+ALTER TABLE text_messages ADD COLUMN IF NOT EXISTS failure TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS text_messages_by_sid ON text_messages (twilio_sid);
 CREATE TABLE IF NOT EXISTS opt_outs (
   phone TEXT PRIMARY KEY,
   at TIMESTAMPTZ NOT NULL DEFAULT now()

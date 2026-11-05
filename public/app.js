@@ -5,7 +5,7 @@ const CRMS = ['DealerSocket', 'DriveCentric', 'Elead', 'Ford Direct', 'ProMax', 
 const AI_MODELS = { OpenAI: [['gpt-5.6-luna', 'GPT-5.6 Luna (fast, low cost)'], ['gpt-5.6-terra', 'GPT-5.6 Terra (balanced)'], ['gpt-5.6-sol', 'GPT-5.6 Sol (most capable)']], Anthropic: [['claude-haiku-5-5', 'Claude Haiku 5.5 (fast, low cost)'], ['claude-sonnet-5-5', 'Claude Sonnet 5.5 (balanced)'], ['claude-opus-5-5', 'Claude Opus 5.5 (most capable)']] };
 const statusLabel = { replied: 'Replied', fallback: 'Replied (fallback)', failed: 'Failed', test: 'Test mode', held: 'Held (paused)', queued: 'Working' };
 
-let dealers = [], tpl = {}, leads = [], alerts = [], cache = [], settings = {}, dev = false, sending = true;
+let dealers = [], tpl = {}, leads = [], alerts = [], cache = [], settings = {}, dev = false, sending = true, conns = { twilio: { connected: false, from: '' } };
 let filt = { d: 'all', s: 'all', q: '' }, logF = { q: '', d: 'all', t: 'all' }, tplSel = null, cacheQ = '', fold = { safety: true, ai: false, conn: true }, pvList = [];
 
 const $ = s => document.querySelector(s);
@@ -25,7 +25,7 @@ const timeOf = date => new Intl.DateTimeFormat('en-US', { timeZone: ZONE, hour: 
 
 async function load() {
   const s = await api('GET', '/api/state');
-  settings = s.settings; sending = s.settings.sending; dev = s.dev; cache = s.cache.map(c => ({ ...c, when: `${dayOf(new Date(c.last_scraped))}, ${timeOf(new Date(c.last_scraped))}` }));
+  settings = s.settings; sending = s.settings.sending; dev = s.dev; conns = s.connections || conns; cache = s.cache.map(c => ({ ...c, when: `${dayOf(new Date(c.last_scraped))}, ${timeOf(new Date(c.last_scraped))}` }));
   alerts = s.alerts.map(a => ({ ...a, sev: a.severity }));
   dealers = s.dealers.map(d => ({ id: d.id, name: d.name, mailbox: d.mailbox, passthrough: d.passthrough, site: d.website, staff: d.staff_phones, active: d.active, test: d.test_mode, sales: d.sales_phone, service: d.service_phone, address: d.address, google: d.google_status, crm: d.crm }));
   tpl = Object.fromEntries(s.templates.map(t => [t.dealership_id, { reasons: t.reasons, buttons: t.buttons, logoUrl: t.logo_url, buildingPhotoUrl: t.building_photo_url, links: t.links }]));
@@ -84,7 +84,7 @@ function viewLead(id) {
   <section class="panel"><h2>What the app read</h2><dl class="kv"><dt>Customer</dt><dd>${esc(l.full || l.first)}</dd><dt>Email</dt><dd>${esc(l.email) || '<span class="muted">Not in this lead</span>'}</dd><dt>Phone</dt><dd>${esc(l.phone) || '<span class="muted">Not in this lead</span>'}</dd><dt>Vehicle</dt><dd>${esc(l.vehicle)}</dd><dt>VIN</dt><dd class="tnum">${esc(l.vin) || '<span class="muted">Not in this lead</span>'}</dd><dt>Stock number</dt><dd>${esc(l.stock) || '<span class="muted">Not in this lead</span>'}</dd><dt>Lead type</dt><dd>${esc(l.type)}</dd><dt>Lead ID</dt><dd>${esc(l.deal)}</dd><dt>Lead source</dt><dd>${esc(l.src)}</dd><dt>Photos</dt><dd>${l.photos} found${l.cache ? ' · ' + esc(l.cache) : ''}</dd></dl></section>
   <section class="panel"><h2>Original notification</h2><pre class="raw">${esc(l.raw)}</pre></section>
   <section class="panel"><h2>Timeline</h2><ol class="time">${l.events.map(e => `<li class="${esc(e.severity)}"><time>${timeOf(new Date(e.at))}</time>${esc(e.message)}</li>`).join('')}</ol></section>
-  <section class="panel"><h2>Texts sent</h2>${l.texts.length ? l.texts.map(x => `<div class="sms"><small>To ${esc(x.recipient)} (${esc(x.audience)}, ${esc(x.status)})</small>${esc(x.body)}</div>`).join('') : '<div class="empty">No texts were sent for this lead.</div>'}</section>
+  <section class="panel"><h2>Texts sent</h2>${l.texts.length ? l.texts.map(x => `<div class="sms"><small>To ${esc(x.recipient)} (${esc(x.audience)}, ${esc(x.status)}${x.failure ? ': ' + esc(x.failure) : ''})</small>${esc(x.body)}</div>`).join('') : '<div class="empty">No texts were sent for this lead.</div>'}</section>
  </div>
  <section class="panel"><h2>Reply that was sent</h2>${l.html ? replyBlock(l) : `<div class="banner" style="margin:0">${esc(l.failure || 'No reply has been sent for this lead.')}</div>`}</section></div>`;
 }
@@ -148,7 +148,7 @@ function viewDealerNew() {
   ${field('passthrough', 'CRM passthrough address (required)', 'sales@yourstore.edealerhub.com', 'Replies go here so the CRM logs them. Never notify@eleadnotify.com.', true)}
   ${field('sales', 'Sales phone', '480-555-0100')}${field('service', 'Service phone', '480-555-0101')}
   ${field('address', 'Address', 'Street, city, state ZIP', '', true)}
-  <div class="field full"><label for="staff">Staff phone numbers for text alerts</label><textarea id="staff" style="min-height:80px"></textarea><small>One number per line. Only numbers covered by your approved Twilio campaign.</small></div>
+  <div class="field full" data-f="staff"><label for="staff">Staff phone numbers for text alerts</label><textarea id="staff" style="min-height:80px"></textarea><small>One number per line. Only numbers covered by your approved Twilio campaign.</small><span class="err-msg"></span></div>
  </div></div>`;
 }
 function viewDealer(id) {
@@ -162,7 +162,7 @@ function viewDealer(id) {
   <div class="field"><label for="crm">CRM</label><select id="crm"><option value="">Select a CRM</option>${options(CRMS.map(c => [c, c]), d.crm)}</select><small>The system that receives replies at the passthrough address.</small></div>
   ${val('passthrough', 'CRM passthrough address (required)', d.passthrough, 'Replies go here so the CRM logs them. The app never sends to notify@eleadnotify.com.', true)}
   ${val('sales', 'Sales phone', d.sales)}${val('service', 'Service phone', d.service)}${val('address', 'Address', d.address, '', true)}
-  <div class="field full"><label for="staff">Staff phone numbers for text alerts</label><textarea id="staff" style="min-height:80px">${esc(d.staff.join('\n'))}</textarea><small>One number per line. Only numbers covered by your approved Twilio campaign.</small></div>
+  <div class="field full" data-f="staff"><label for="staff">Staff phone numbers for text alerts</label><textarea id="staff" style="min-height:80px">${esc(d.staff.join('\n'))}</textarea><small>One number per line. Only numbers covered by your approved Twilio campaign.</small><span class="err-msg"></span></div>
  </div>
  <div style="margin-top:12px">
   <div class="toggle"><div><b>${d.active ? 'Deactivate dealership' : 'Reactivate dealership'}</b><small>${d.active ? 'Stops replies and texts for this store and moves it to Deactivated. Past leads stay in the logs.' : 'This store is deactivated. Reactivate it to resume replies and texts.'}</small></div>${d.active ? `<button class="btn sm danger" data-deact="${d.id}">Deactivate</button>` : `<button class="btn sm" data-react="${d.id}">Reactivate</button>`}</div>
@@ -225,7 +225,7 @@ function viewControls() {
  </div><div class="stack">
   <details class="panel fold" data-fold="conn" ${fold.conn ? 'open' : ''}><summary><span>Connections</span></summary>
    <div class="conn"><div><b>Google Workspace</b><small>${connected} of ${active} active mailboxes connected</small></div>${connected && connected === active ? '<span class="chip replied">Connected</span>' : notYet}</div>
-   <div class="conn"><div><b>Twilio</b><small>Staff texts and STOP handling</small></div>${notYet}</div>
+   <div class="conn"><div><b>Twilio</b><small>${conns.twilio.connected ? `Texts send from ${esc(conns.twilio.from)}. STOP and START replies are handled.` : 'Staff texts and STOP handling'}</small></div>${conns.twilio.connected ? '<span class="chip replied">Connected</span>' : notYet}</div>
    <div class="conn"><div><b>Firecrawl</b><small>Photo search by VIN</small></div>${notYet}</div>
    <div class="conn"><div><b>${esc(settings.model_provider)} (conversational replies)</b><small>Key not added yet</small></div>${notYet}</div>
    <p class="muted" style="margin:12px 0 0">Keys live on the server, never on this screen.</p>

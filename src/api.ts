@@ -4,6 +4,7 @@ import { ELEAD_SENDER } from './lead/parseElead.ts';
 import { answerLead } from './lead/pipeline.ts';
 import type { Services } from './lead/pipeline.ts';
 import { buildReply } from './lead/replyEmail.ts';
+import { normalizePhone } from './sms.ts';
 
 const EMAIL = /^\S+@\S+\.\S+$/;
 
@@ -17,8 +18,15 @@ function storeInput(body: any) {
     sales: String(body.sales ?? '').trim(),
     service: String(body.service ?? '').trim(),
     address: String(body.address ?? '').trim(),
-    staff: JSON.stringify((body.staff ?? []).map((s: string) => String(s).trim()).filter(Boolean)),
+    staffTyped: ((body.staff ?? []) as unknown[]).map((s) => String(s).trim()).filter(Boolean),
   };
+}
+
+// Staff numbers are saved in Twilio's format, so every comparison (like STOP) matches.
+function staffNumbers(typed: string[]): { saved: string; error: string } {
+  const bad = typed.filter((n) => !normalizePhone(n));
+  if (bad.length) return { saved: '', error: `This doesn’t look like a phone number: ${bad[0]}. Use a 10-digit number like 480-555-0100.` };
+  return { saved: JSON.stringify([...new Set(typed.map(normalizePhone))]), error: '' };
 }
 
 function refusedPassthrough(address: string): string {
@@ -31,7 +39,11 @@ function refusedPassthrough(address: string): string {
 const PREVIEW_PHOTO = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 120"><rect width="160" height="120" fill="#d7dde6"/></svg>')}`;
 const SAMPLE_LEAD = { firstName: 'Alex', year: 2027, make: 'Cadillac', model: 'Escalade', trim: 'V-Series 4dr 4x4', vin: '1GYS9HK92VR133820', stock: 'C27099', leadType: 'New Vehicle (VIN)' };
 
-export function registerApi(app: FastifyInstance, db: Db, services: Services, dev: boolean) {
+export interface Connections {
+  twilio: { connected: boolean; from: string };
+}
+
+export function registerApi(app: FastifyInstance, db: Db, services: Services, dev: boolean, connections: Connections = { twilio: { connected: false, from: '' } }) {
   // Everything the screens show, in one request. Keys never appear here.
   app.get('/api/state', async () => {
     const [dealers, templates, leads, events, texts, alerts, cache, settings] = await Promise.all([
@@ -41,12 +53,12 @@ export function registerApi(app: FastifyInstance, db: Db, services: Services, de
                   r.html, r.text_body, r.photo_count, r.photo_source
                 FROM leads l LEFT JOIN responses r ON r.lead_id = l.id ORDER BY l.received_at DESC LIMIT 1000`),
       db.query('SELECT lead_id, at, message, severity FROM lead_events ORDER BY id'),
-      db.query('SELECT lead_id, recipient, audience, body, status FROM text_messages ORDER BY id'),
+      db.query('SELECT lead_id, recipient, audience, body, status, failure FROM text_messages ORDER BY id'),
       db.query('SELECT * FROM alerts WHERE dismissed_at IS NULL ORDER BY created_at DESC'),
       db.query('SELECT * FROM vehicle_cache ORDER BY last_scraped DESC'),
       db.query('SELECT * FROM settings'),
     ]);
-    return { dealers, templates, leads, events, texts, alerts, cache, settings: settings[0], dev };
+    return { dealers, templates, leads, events, texts, alerts, cache, settings: settings[0], dev, connections };
   });
 
   app.post('/api/dealerships', async (request, reply) => {
@@ -61,13 +73,15 @@ export function registerApi(app: FastifyInstance, db: Db, services: Services, de
     const refused = refusedPassthrough(d.passthrough);
     if (refused) errors.passthrough = refused;
     else if (!EMAIL.test(d.passthrough)) errors.passthrough = 'Enter the CRM passthrough address, like sales@yourstore.edealerhub.com.';
+    const staff = staffNumbers(d.staffTyped);
+    if (staff.error) errors.staff = staff.error;
     if (Object.keys(errors).length) return reply.code(400).send({ errors });
 
     // test_mode is left to its default on purpose: every new store starts in test mode.
     const [row] = await db.query(
       `INSERT INTO dealerships (name, website, mailbox, crm, passthrough, sales_phone, service_phone, address, staff_phones)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-      [d.name, d.website, d.mailbox, d.crm, d.passthrough, d.sales, d.service, d.address, d.staff],
+      [d.name, d.website, d.mailbox, d.crm, d.passthrough, d.sales, d.service, d.address, staff.saved],
     );
     await db.query('INSERT INTO templates (dealership_id) VALUES ($1)', [row.id]);
     await db.query(
@@ -82,11 +96,13 @@ export function registerApi(app: FastifyInstance, db: Db, services: Services, de
     const refused = refusedPassthrough(d.passthrough);
     if (refused) return reply.code(400).send({ errors: { passthrough: refused } });
     if (!d.name) return reply.code(400).send({ errors: { name: 'Enter the dealership name.' } });
+    const staff = staffNumbers(d.staffTyped);
+    if (staff.error) return reply.code(400).send({ errors: { staff: staff.error } });
     await db.query(
       `UPDATE dealerships SET name=$2, website=$3,
          google_status = CASE WHEN mailbox = $4 THEN google_status ELSE 'new' END, mailbox=$4,
          crm=$5, passthrough=$6, sales_phone=$7, service_phone=$8, address=$9, staff_phones=$10 WHERE id=$1`,
-      [request.params.id, d.name, d.website, d.mailbox, d.crm, d.passthrough, d.sales, d.service, d.address, d.staff],
+      [request.params.id, d.name, d.website, d.mailbox, d.crm, d.passthrough, d.sales, d.service, d.address, staff.saved],
     );
     return { ok: true };
   });
@@ -162,12 +178,15 @@ export function registerApi(app: FastifyInstance, db: Db, services: Services, de
     return { ok: true };
   });
 
-  app.put<{ Body: any }>('/api/settings', async (request) => {
+  app.put<{ Body: any }>('/api/settings', async (request, reply) => {
     const s = request.body as any;
+    const typedPhone = String(s.testPhone ?? '').trim();
+    const testPhone = normalizePhone(typedPhone);
+    if (typedPhone && !testPhone) return reply.code(400).send({ error: 'Your test phone doesn’t look like a phone number. Use a 10-digit number like 480-555-0100.' });
     await db.query(
       `UPDATE settings SET customer_texts=$1, owner_test_email=$2, owner_test_phone=$3, model_enabled=$4,
          model_provider=$5, model_id=$6, model_timeout_seconds=$7, photo_timeout_seconds=$8`,
-      [Boolean(s.customerTexts), String(s.testEmail ?? '').trim(), String(s.testPhone ?? '').trim(), Boolean(s.modelEnabled),
+      [Boolean(s.customerTexts), String(s.testEmail ?? '').trim(), testPhone, Boolean(s.modelEnabled),
         s.provider, s.model, Math.min(10, Math.max(1, Number(s.modelTimeout) || 3)), Math.min(30, Math.max(1, Number(s.photoTimeout) || 5))],
     );
     return { ok: true };
