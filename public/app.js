@@ -27,7 +27,7 @@ async function load() {
   const s = await api('GET', '/api/state');
   settings = s.settings; sending = s.settings.sending; dev = s.dev; conns = s.connections || conns; cache = s.cache.map(c => ({ ...c, when: `${dayOf(new Date(c.last_scraped))}, ${timeOf(new Date(c.last_scraped))}` }));
   alerts = s.alerts.map(a => ({ ...a, sev: a.severity }));
-  dealers = s.dealers.map(d => ({ id: d.id, name: d.name, mailbox: d.mailbox, passthrough: d.passthrough, site: d.website, staff: d.staff_phones, active: d.active, test: d.test_mode, sales: d.sales_phone, service: d.service_phone, address: d.address, google: d.google_status, crm: d.crm }));
+  dealers = s.dealers.map(d => ({ id: d.id, name: d.name, mailbox: d.mailbox, passthrough: d.passthrough, site: d.website, staff: d.staff_phones, active: d.active, test: d.test_mode, sales: d.sales_phone, service: d.service_phone, address: d.address, google: d.google_status, crm: d.crm, textFormat: d.staff_text_format || 'formatted' }));
   tpl = Object.fromEntries(s.templates.map(t => [t.dealership_id, { reasons: t.reasons, buttons: t.buttons, logoUrl: t.logo_url, buildingPhotoUrl: t.building_photo_url, links: t.links }]));
   const today = dayOf(new Date());
   leads = s.leads.map(l => {
@@ -149,6 +149,7 @@ function viewDealerNew() {
   ${field('sales', 'Sales phone', '480-555-0100')}${field('service', 'Service phone', '480-555-0101')}
   ${field('address', 'Address', 'Street, city, state ZIP', '', true)}
   <div class="field full" data-f="staff"><label for="staff">Staff phone numbers for text alerts</label><textarea id="staff" style="min-height:80px"></textarea><small>One number per line. Only numbers covered by your approved Twilio campaign.</small><span class="err-msg"></span></div>
+  <div class="field"><label for="textfmt">Staff text format</label><select id="textfmt">${options([['formatted', 'Formatted'], ['raw', 'Raw']], 'formatted')}</select><small>Formatted: tidy lines with the customer, vehicle, phone and email. Raw: the lead notification exactly as it came in (longer texts cost more).</small></div>
  </div></div>`;
 }
 function viewDealer(id) {
@@ -163,6 +164,7 @@ function viewDealer(id) {
   ${val('passthrough', 'CRM passthrough address (required)', d.passthrough, 'Replies go here so the CRM logs them. The app never sends to notify@eleadnotify.com.', true)}
   ${val('sales', 'Sales phone', d.sales)}${val('service', 'Service phone', d.service)}${val('address', 'Address', d.address, '', true)}
   <div class="field full" data-f="staff"><label for="staff">Staff phone numbers for text alerts</label><textarea id="staff" style="min-height:80px">${esc(d.staff.join('\n'))}</textarea><small>One number per line. Only numbers covered by your approved Twilio campaign.</small><span class="err-msg"></span></div>
+  <div class="field"><label for="textfmt">Staff text format</label><select id="textfmt">${options([['formatted', 'Formatted'], ['raw', 'Raw']], d.textFormat)}</select><small>Formatted: tidy lines with the customer, vehicle, phone and email. Raw: the lead notification exactly as it came in (longer texts cost more).</small></div>
  </div>
  <div style="margin-top:12px">
   <div class="toggle"><div><b>${d.active ? 'Deactivate dealership' : 'Reactivate dealership'}</b><small>${d.active ? 'Stops replies and texts for this store and moves it to Deactivated. Past leads stay in the logs.' : 'This store is deactivated. Reactivate it to resume replies and texts.'}</small></div>${d.active ? `<button class="btn sm danger" data-deact="${d.id}">Deactivate</button>` : `<button class="btn sm" data-react="${d.id}">Reactivate</button>`}</div>
@@ -320,7 +322,7 @@ function router() {
 }
 async function refresh() { await load(); router(); }
 const act = fn => async (...args) => { try { await fn(...args); } catch (e) { toast(e.message); } };
-const formValues = () => ({ name: $('#name').value, site: $('#site').value, mailbox: $('#mailbox').value, crm: $('#crm').value, passthrough: $('#passthrough').value, sales: $('#sales').value, service: $('#service').value, address: $('#address').value, staff: $('#staff').value.split('\n') });
+const formValues = () => ({ name: $('#name').value, site: $('#site').value, mailbox: $('#mailbox').value, crm: $('#crm').value, passthrough: $('#passthrough').value, sales: $('#sales').value, service: $('#service').value, address: $('#address').value, staff: $('#staff').value.split('\n'), textFormat: $('#textfmt').value });
 function showErrors(errors) {
   document.querySelectorAll('.field.err').forEach(f => { f.classList.remove('err'); f.querySelector('.err-msg').textContent = ''; });
   Object.entries(errors || {}).forEach(([k, m]) => { const f = document.querySelector(`[data-f="${k}"]`); if (f) { f.classList.add('err'); f.querySelector('.err-msg').textContent = m; } });

@@ -89,6 +89,8 @@ CREATE TABLE IF NOT EXISTS text_messages (
   sent_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   status TEXT NOT NULL
 );
+-- Each dealership chooses how staff texts look: 'formatted' or 'raw'.
+ALTER TABLE dealerships ADD COLUMN IF NOT EXISTS staff_text_format TEXT NOT NULL DEFAULT 'formatted';
 -- Added for Twilio: its message ID links delivery updates back to the text.
 ALTER TABLE text_messages ADD COLUMN IF NOT EXISTS twilio_sid TEXT NOT NULL DEFAULT '';
 ALTER TABLE text_messages ADD COLUMN IF NOT EXISTS failure TEXT NOT NULL DEFAULT '';

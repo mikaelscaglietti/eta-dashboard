@@ -18,6 +18,7 @@ function storeInput(body: any) {
     sales: String(body.sales ?? '').trim(),
     service: String(body.service ?? '').trim(),
     address: String(body.address ?? '').trim(),
+    textFormat: body.textFormat === 'raw' ? 'raw' : 'formatted',
     staffTyped: ((body.staff ?? []) as unknown[]).map((s) => String(s).trim()).filter(Boolean),
   };
 }
@@ -79,9 +80,9 @@ export function registerApi(app: FastifyInstance, db: Db, services: Services, de
 
     // test_mode is left to its default on purpose: every new store starts in test mode.
     const [row] = await db.query(
-      `INSERT INTO dealerships (name, website, mailbox, crm, passthrough, sales_phone, service_phone, address, staff_phones)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-      [d.name, d.website, d.mailbox, d.crm, d.passthrough, d.sales, d.service, d.address, staff.saved],
+      `INSERT INTO dealerships (name, website, mailbox, crm, passthrough, sales_phone, service_phone, address, staff_phones, staff_text_format)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+      [d.name, d.website, d.mailbox, d.crm, d.passthrough, d.sales, d.service, d.address, staff.saved, d.textFormat],
     );
     await db.query('INSERT INTO templates (dealership_id) VALUES ($1)', [row.id]);
     await db.query(
@@ -101,8 +102,8 @@ export function registerApi(app: FastifyInstance, db: Db, services: Services, de
     await db.query(
       `UPDATE dealerships SET name=$2, website=$3,
          google_status = CASE WHEN mailbox = $4 THEN google_status ELSE 'new' END, mailbox=$4,
-         crm=$5, passthrough=$6, sales_phone=$7, service_phone=$8, address=$9, staff_phones=$10 WHERE id=$1`,
-      [request.params.id, d.name, d.website, d.mailbox, d.crm, d.passthrough, d.sales, d.service, d.address, staff.saved],
+         crm=$5, passthrough=$6, sales_phone=$7, service_phone=$8, address=$9, staff_phones=$10, staff_text_format=$11 WHERE id=$1`,
+      [request.params.id, d.name, d.website, d.mailbox, d.crm, d.passthrough, d.sales, d.service, d.address, staff.saved, d.textFormat],
     );
     return { ok: true };
   });

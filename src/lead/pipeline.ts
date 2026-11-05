@@ -2,6 +2,7 @@ import type { Db } from '../db.ts';
 import { ELEAD_SENDER, looksLikeLead, parseElead } from './parseElead.ts';
 import { NON_VEHICLE_TYPES, buildReply, replySubject } from './replyEmail.ts';
 import { normalizePhone } from '../sms.ts';
+import { staffText } from './staffText.ts';
 
 export interface InboundEmail {
   from: string;
@@ -252,7 +253,7 @@ export async function answerLead(db: Db, services: Services, leadId: number): Pr
 }
 
 async function sendTexts(db: Db, services: Services, store: any, settings: any, lead: any, vehicle: string, seconds: number, testMode: boolean) {
-  const staffBody = `New lead: ${lead.first_name || 'A customer'} is asking about the ${vehicle || 'a vehicle'}. Reply sent in ${seconds.toFixed(0)}s.`;
+  const staffBody = staffText(store.staff_text_format === 'raw' ? 'raw' : 'formatted', store.name, lead);
   const targets: { to: string; audience: string; body: string }[] = testMode
     ? settings.owner_test_phone ? [{ to: settings.owner_test_phone, audience: 'staff', body: staffBody }] : []
     : (store.staff_phones as string[]).map((to) => ({ to, audience: 'staff', body: staffBody }));

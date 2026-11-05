@@ -8,6 +8,7 @@ import type { Db } from '../src/db.ts';
 import { ELEAD_SENDER } from '../src/lead/parseElead.ts';
 import { receiveEmail } from '../src/lead/pipeline.ts';
 import type { Services } from '../src/lead/pipeline.ts';
+import { MAX_TEXT_LENGTH, staffText } from '../src/lead/staffText.ts';
 import { isGenuineTwilioRequest, normalizePhone, optKeyword, twilioSender, twilioSignature } from '../src/sms.ts';
 import type { TwilioSettings } from '../src/sms.ts';
 
@@ -263,5 +264,48 @@ describe('saving staff numbers', () => {
     const good = await app.inject({ method: 'POST', url: '/api/dealerships', cookies, payload: { ...store, staff: ['480-555-0100', '(480) 555-0100', '480.555.0101'] } });
     expect(good.statusCode).toBe(200);
     expect((await db.query('SELECT staff_phones FROM dealerships'))[0].staff_phones).toEqual(['+14805550100', '+14805550101']);
+  });
+});
+
+describe('staff text format', () => {
+  const lead = {
+    first_name: 'Iliana', last_name: 'Munoz', lead_type: 'New Vehicle', year: 2026, make: 'Cadillac', model: 'CT4',
+    phone: '602-555-0100', email: 'iliana@example.com', raw: '<> Vehicle: 2026 Name: Iliana Munoz Phone: 602-555-0100 <>',
+  };
+
+  it('Formatted matches the layout staff get today', () => {
+    expect(staffText('formatted', 'Earnhardt Chandler Cadillac', lead)).toBe(
+      'NEW LEAD - Earnhardt Chandler Cadillac\nType: New Vehicle\nCustomer: Iliana Munoz\nVehicle: 2026 Cadillac CT4\nPhone: 602-555-0100\nEmail: iliana@example.com',
+    );
+  });
+
+  it('Formatted leaves out lines the lead didn’t include', () => {
+    expect(staffText('formatted', 'Store', { ...lead, phone: '', email: '' })).not.toMatch(/Phone|Email/);
+  });
+
+  it('Raw sends the notification exactly as it came in', () => {
+    expect(staffText('raw', 'Store', lead)).toBe(lead.raw);
+  });
+
+  it('never goes over Twilio’s length limit', () => {
+    const long = staffText('raw', 'Store', { ...lead, raw: 'x'.repeat(5000) });
+    expect(long.length).toBe(MAX_TEXT_LENGTH);
+    expect(long.endsWith('…')).toBe(true);
+  });
+
+  it('each dealership’s choice is used for its leads', async () => {
+    const db = await openDb();
+    const [store] = await db.query(
+      `INSERT INTO dealerships (name, mailbox, passthrough, crm, staff_phones, test_mode, google_status, staff_text_format)
+       VALUES ('Raw Store', 'raw@etarsp.com', 'sales@raw.example.com', 'Elead', '["4805550100"]', FALSE, 'ok', 'raw') RETURNING id`,
+    );
+    await db.query(`INSERT INTO templates (dealership_id) VALUES ($1)`, [store.id]);
+    const bodies: string[] = [];
+    const body = '<> Raw Store Vehicle wanted: 2027 Cadillac Escalade Name: Alex Sample Phone: (555) 555-0100 <>';
+    await receiveEmail(db, {
+      sendEmail: async () => {}, wasSent: async () => false, findPhotos: async () => ({ photos: [], pageUrl: '' }), writeGreeting: async () => '',
+      sendText: async (_to, text) => { bodies.push(text); },
+    }, store.id, { from: ELEAD_SENDER, subject: 'Deal IN: 222  New Customer', body, messageId: '<r@b>', threadId: 't', receivedAt: new Date() });
+    expect(bodies).toEqual([body]);
   });
 });
