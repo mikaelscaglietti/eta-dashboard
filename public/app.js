@@ -5,10 +5,10 @@ const CRMS = ['DealerSocket', 'DriveCentric', 'Elead', 'Ford Direct', 'ProMax', 
 const AI_MODELS = { OpenAI: [['gpt-5.6-luna', 'GPT-5.6 Luna (fast, low cost)'], ['gpt-5.6-terra', 'GPT-5.6 Terra (balanced)'], ['gpt-5.6-sol', 'GPT-5.6 Sol (most capable)']], Anthropic: [['claude-haiku-5-5', 'Claude Haiku 5.5 (fast, low cost)'], ['claude-sonnet-5-5', 'Claude Sonnet 5.5 (balanced)'], ['claude-opus-5-5', 'Claude Opus 5.5 (most capable)']] };
 const statusLabel = { replied: 'Replied', fallback: 'Replied (fallback)', failed: 'Failed', test: 'Test mode', held: 'Held (paused)', queued: 'Working' };
 
-let dealers = [], tpl = {}, leads = [], alerts = [], cache = [], settings = {}, dev = false, sending = true, conns = { twilio: { connected: false, from: '' } };
+let dealers = [], tplList = [], leads = [], alerts = [], cache = [], settings = {}, dev = false, sending = true, conns = { twilio: { connected: false, from: '' } };
 let mon = null, monF = { range: 'today', d: 'all' };
 let deactOpen = false; try { deactOpen = localStorage.getItem('deactOpen') === '1'; } catch {}
-let filt = { d: 'all', s: 'all', q: '' }, logF = { q: '', d: 'all', t: 'all' }, tplSel = null, cacheQ = '', fold = { safety: true, ai: false, conn: true }, pvList = [];
+let filt = { d: 'all', s: 'all', q: '' }, logF = { q: '', d: 'all', t: 'all' }, tplSel = null, cacheQ = '', fold = { safety: true, ai: false, conn: true, tstyle: false }, pvList = [];
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -30,8 +30,8 @@ async function load() {
   mon = m;
   settings = s.settings; sending = s.settings.sending; dev = s.dev; conns = s.connections || conns; cache = s.cache.map(c => ({ ...c, when: `${dayOf(new Date(c.last_scraped))}, ${timeOf(new Date(c.last_scraped))}` }));
   alerts = s.alerts.map(a => ({ ...a, sev: a.severity }));
-  dealers = s.dealers.map(d => ({ id: d.id, name: d.name, mailbox: d.mailbox, passthrough: d.passthrough, site: d.website, staff: d.staff_phones, active: d.active, test: d.test_mode, sales: d.sales_phone, service: d.service_phone, address: d.address, google: d.google_status, crm: d.crm, textFormat: d.staff_text_format || 'formatted' }));
-  tpl = Object.fromEntries(s.templates.map(t => [t.dealership_id, { reasons: t.reasons, buttons: t.buttons, logoUrl: t.logo_url, buildingPhotoUrl: t.building_photo_url, links: t.links }]));
+  dealers = s.dealers.map(d => ({ id: d.id, name: d.name, mailbox: d.mailbox, passthrough: d.passthrough, site: d.website, staff: d.staff_phones, active: d.active, test: d.test_mode, sales: d.sales_phone, service: d.service_phone, address: d.address, google: d.google_status, crm: d.crm, activeTpl: d.active_template_id, textFormat: d.staff_text_format || 'formatted' }));
+  tplList = s.templates;
   const today = dayOf(new Date());
   leads = s.leads.map(l => {
     const at = new Date(l.received_at), day = dayOf(at);
@@ -179,22 +179,101 @@ function viewDealer(id) {
   <div class="toggle"><div><b>Send test</b><small>Replies as this address to your test inbox before the store goes live.</small></div><button class="btn sm" disabled>Send test</button></div>
  </div></div>`;
 }
+/* ---------- templates: visual block editor ---------- */
+const BLOCKS = {
+  header: 'Logo / header', greeting: 'Greeting', message: 'Main message', reasons: 'Reasons to buy', photos: 'Vehicle photos',
+  buttons: 'Buttons', image: 'Image', text: 'Text', closing: 'Closing', signature: 'Signature', divider: 'Divider line', spacer: 'Space',
+};
+const SHOW_FOR = [['all', 'Every lead'], ['vehicle', 'Vehicle found'], ['unavailable', 'Vehicle unavailable'], ['service', 'Service & general']];
+const FONTS = ['Arial', 'Helvetica', 'Verdana', 'Tahoma', 'Trebuchet MS', 'Georgia', 'Times New Roman'];
+const PH = [['{first_name}', 'First name'], ['{vehicle}', 'Vehicle'], ['{model}', 'Model'], ['{dealership}', 'Dealership'], ['{vin}', 'VIN'], ['{stock}', 'Stock #']];
+let ed = { dealer: null, id: null, draft: null, dirty: false, sel: null, sample: 'vehicle' };
+const bid = () => 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+function freshBlock(type) {
+  const b = { id: bid(), type, showFor: 'all' };
+  const d = {
+    header: { logoUrl: '', align: 'center', logoWidth: 260 },
+    message: { vehicle: 'Thank you for contacting {dealership}. The {vehicle} you’re looking at is available here at {dealership}.', unavailable: 'Thank you for contacting {dealership}. Unfortunately the vehicle you requested is unavailable, however someone from the dealership will contact you shortly to go over your options.', service: 'Thank you for contacting {dealership}. A member of our team will reach out to you shortly about your request.' },
+    reasons: { intro: 'Here are a few reasons you should only buy from {dealership}:', items: [] },
+    photos: { caption: 'Here are pictures of your {model}.', fallbackCaption: 'Take a look at similar vehicles we have right now.' },
+    buttons: { items: [{ label: 'Schedule Test Drive', url: '' }] }, image: { url: '', alt: '' }, text: { text: '', bold: false, align: 'left' },
+    closing: { text: 'A certified sales consultant will be contacting you shortly.', thanks: 'Thank you again for your interest in {dealership}.' },
+    signature: { signoff: 'Respectfully,' }, spacer: { size: 16 },
+  }[type] || {};
+  return { ...b, ...JSON.parse(JSON.stringify(d)) };
+}
+const dealerTemplates = id => tplList.filter(t => t.dealership_id === id);
+function openTemplate(id) {
+  const t = tplList.find(x => x.id === id);
+  ed.id = id; ed.dirty = false; ed.sel = null;
+  ed.draft = t ? JSON.parse(JSON.stringify({ name: t.name, blocks: t.blocks, style: t.style })) : null;
+}
+// Leaving unsaved changes always asks first.
+function guard(next) {
+  if (!ed.dirty) return next();
+  confirmBox('Discard unsaved changes?', 'This template has changes that are not saved yet.', 'Discard', next);
+}
+function blockSummary(b) {
+  const cut = t => (t || '').replace(/\s+/g, ' ').slice(0, 60);
+  const n = (b.items || []).length;
+  const f = {
+    header: () => b.logoUrl ? 'Logo image' : 'Dealership name in capitals', greeting: () => 'Hi {first_name},', message: () => cut(b.vehicle),
+    reasons: () => `${n} reason${n === 1 ? '' : 's'}`, photos: () => 'Up to 3 photos when found', buttons: () => (b.items || []).map(x => x.label).filter(Boolean).join(', ') || 'No buttons yet',
+    image: () => b.url ? cut(b.url) : 'No image link yet', text: () => cut(b.text) || 'Empty', closing: () => cut(b.text), signature: () => 'From the dealership page', divider: () => '', spacer: () => `${b.size}px`,
+  }[b.type];
+  return f ? f() : '';
+}
+const phChips = () => `<div class="phs" aria-label="Insert a detail">${PH.map(([k, l]) => `<button type="button" class="btn sm" data-ph="${k}" title="Insert ${l}">${l}</button>`).join('')}</div>`;
+const fld = (label, html, hint = '') => `<div class="field"><label>${label}</label>${html}${hint ? `<small>${hint}</small>` : ''}</div>`;
+const tin = (k, v, ph = '') => `<input data-k="${k}" value="${esc(v ?? '')}" placeholder="${esc(ph)}">`;
+const tarea = (k, v, h = 90) => `<textarea data-k="${k}" style="min-height:${h}px">${esc(v ?? '')}</textarea>`;
+function blockSettings(b) {
+  const f = {
+    header: () => fld('Logo image link', tin('logoUrl', b.logoUrl, 'https://yourstore.com/logo.png'), 'Leave empty to show the dealership name in capitals.') + `<div class="form two">${fld('Position', `<select data-k="align">${options([['center', 'Centered'], ['left', 'Left']], b.align)}</select>`)}${fld('Logo width (pixels)', `<input data-k="logoWidth" type="number" min="60" max="560" value="${b.logoWidth}">`)}</div>`,
+    greeting: () => '<p class="muted">Says “Hi” and the customer’s first name. When conversational replies are on in Settings, the model writes this line instead.</p>',
+    message: () => fld('When the vehicle is found', tarea('vehicle', b.vehicle)) + fld('When the vehicle is unavailable (no VIN)', tarea('unavailable', b.unavailable)) + fld('For service and general questions', tarea('service', b.service)) + phChips(),
+    reasons: () => fld('Line above the list', tin('intro', b.intro)) + fld('Reasons', tarea('items', b.items.join('\n'), 150), 'One per line. Each becomes a bullet.') + phChips(),
+    photos: () => fld('Caption above the photos', tin('caption', b.caption)) + fld('Line shown instead when the vehicle is unavailable', tin('fallbackCaption', b.fallbackCaption)) + phChips(),
+    buttons: () => `<div class="btnrows">${b.items.map((x, i) => `<div class="btnrow"><input data-k="btn-label" data-i="${i}" value="${esc(x.label)}" placeholder="Button text" aria-label="Button ${i + 1} text"><input data-k="btn-url" data-i="${i}" value="${esc(x.url)}" placeholder="https://yourstore.com/test-drive?vin={vin}" aria-label="Button ${i + 1} link"><button type="button" class="btn sm" data-btnrm="${i}" aria-label="Remove button ${i + 1}">Remove</button></div>`).join('')}</div>
+      ${b.items.length < 6 ? '<button type="button" class="btn sm" data-btnadd>Add button</button>' : ''}<small class="muted" style="display:block;margin-top:8px">Links must start with https://. Use {vin} and {stock} in a link to point at the exact vehicle. A button without a link is left out of the email. The first button uses the main button color.</small>`,
+    image: () => fld('Image link', tin('url', b.url, 'https://yourstore.com/building.jpg')) + fld('Description', tin('alt', b.alt, 'Our showroom'), 'Shown if the image can’t load.'),
+    text: () => fld('Text', tarea('text', b.text, 110)) + `<div class="form two">${fld('Style', `<select data-k="bold">${options([['', 'Normal'], ['1', 'Bold']], b.bold ? '1' : '')}</select>`)}${fld('Position', `<select data-k="align">${options([['left', 'Left'], ['center', 'Centered']], b.align)}</select>`)}</div>` + phChips(),
+    closing: () => fld('Closing paragraph', tarea('text', b.text, 110)) + fld('Thank-you line', tin('thanks', b.thanks)) + phChips(),
+    signature: () => fld('Sign-off', tin('signoff', b.signoff, 'Respectfully,')) + '<p class="muted">The dealership name, phone numbers, address and website always come from the dealership page, so they are never typed wrong here.</p>',
+    divider: () => '<p class="muted">A thin line across the email.</p>',
+    spacer: () => fld('Height (pixels)', `<input data-k="size" type="number" min="4" max="80" value="${b.size}">`),
+  }[b.type];
+  return `${f ? f() : ''}${fld('Show this block for', `<select data-k="showFor">${options(SHOW_FOR, b.showFor || 'all')}</select>`)}`;
+}
 function viewTemplates() {
-  if (!dealers.length) return '<h1>Templates</h1><p class="sub">Edit the parts of the reply that stay the same.</p><div class="panel"><div class="empty">Add a dealership first. Its template appears here.</div></div>';
-  if (!tpl[tplSel]) tplSel = dealers[0].id;
-  const t = tpl[tplSel];
-  return `<div class="head"><div><h1>Templates</h1><p class="sub">Edit the parts of the reply that stay the same. The preview updates as you type.</p></div><button class="btn primary" id="savetpl">Save template</button></div>
- <div class="filters"><select id="tsel" aria-label="Dealership">${options(dealers.map(x => [x.id, x.name]), tplSel)}</select></div>
- <div class="cols"><section class="panel"><div class="form" style="grid-template-columns:1fr">
-  <div class="field"><label for="t-reasons">Reasons to buy</label><textarea id="t-reasons" style="min-height:170px">${esc(t.reasons)}</textarea><small>One per line. Each becomes a bullet.</small></div>
-  <div class="field"><label for="t-btn">Buttons</label><input id="t-btn" value="${esc(t.buttons)}"><small>Separate with commas. The first is the dark button.</small></div>
-  <div class="field"><label for="t-links">Button links</label><textarea id="t-links" style="min-height:110px" placeholder="Schedule Test Drive = https://yourstore.com/test-drive">${esc(t.links)}</textarea><small>One per line, as Button name = https link. Use {vin} and {stock} for links that change per vehicle. A button with no link is left out of the email.</small></div>
-  <div class="field"><label for="t-logo">Logo image link</label><input id="t-logo" value="${esc(t.logoUrl)}" placeholder="https://yourstore.com/logo.png"></div>
-  <div class="field"><label for="t-bldg">Building photo link</label><input id="t-bldg" value="${esc(t.buildingPhotoUrl)}" placeholder="https://yourstore.com/building.jpg"></div>
-  <div class="field"><label>Name, phone numbers, and address</label><small>These come from the dealership page, not from this template. Edit them there.</small></div>
-  <div class="field"><label for="t-lead">Preview with</label><select id="t-lead"><option value="full">Alex, 2027 Cadillac Escalade (photos found)</option><option value="fallback">Alex, no VIN (vehicle unavailable)</option></select></div>
- </div></section>
- <section class="panel"><h2>Preview</h2><div id="tprev" class="emailframe"></div></section></div>`;
+  const ad = dealers.filter(d => d.active);
+  if (!ad.length) return '<h1>Templates</h1><p class="sub">Build the reply email each dealership sends.</p><div class="panel"><div class="empty">Add a dealership first. Its templates appear here.</div></div>';
+  if (!ad.some(d => d.id === ed.dealer)) { ed.dealer = ad[0].id; ed.id = null; }
+  const list = dealerTemplates(ed.dealer), store = dealers.find(d => d.id === ed.dealer);
+  if (!list.some(t => t.id === ed.id)) openTemplate((list.find(t => t.id === store.activeTpl) || list[0])?.id);
+  const t = list.find(x => x.id === ed.id), dr = ed.draft;
+  if (!t || !dr) return '<h1>Templates</h1><div class="empty">Loading…</div>';
+  const inUse = store.activeTpl === t.id, st = dr.style;
+  const colorF = (k, label) => `<label class="colorf">${label}<span><input type="color" data-style="${k}" value="${esc(st[k])}" aria-label="${label}"><code>${esc(st[k])}</code></span></label>`;
+  return `<div class="head"><div><h1>Templates</h1><p class="sub">Build the reply email from blocks. The preview updates as you work.</p></div><div class="acts">${ed.dirty ? '<span class="chip fallback">Unsaved changes</span>' : ''}<button class="btn primary" id="savetpl">Save template</button></div></div>
+ <div class="filters"><select id="tsel" aria-label="Dealership">${options(ad.map(x => [x.id, x.name]), ed.dealer)}</select></div>
+ <section class="panel tplbar"><div class="tpltabs" role="tablist" aria-label="Templates for ${esc(store.name)}">${list.map(x => `<button role="tab" aria-selected="${x.id === t.id}" class="tpltab ${x.id === t.id ? 'on' : ''}" data-tpl="${x.id}">${esc(x.name)}${store.activeTpl === x.id ? ' <span class="chip replied">In use</span>' : ''}${x.is_default ? ' <span class="chip off">Default</span>' : ''}</button>`).join('')}</div>
+  <div class="tplacts"><button class="btn sm" id="tplnew">New template</button><button class="btn sm" id="tpldup">Duplicate</button>${inUse ? '' : '<button class="btn sm" id="tpluse">Use for replies</button>'}<button class="btn sm danger" id="tpldel" ${t.is_default ? 'disabled title="The default template can’t be deleted"' : ''}>Delete</button></div>
+  <div class="field" style="margin-top:12px;max-width:360px"><label for="tplname">Template name</label><input id="tplname" value="${esc(dr.name)}"></div>
+  <p class="muted small">${inUse ? `${esc(store.name)} replies with this template.` : `Not in use. ${esc(store.name)} replies with “${esc(list.find(x => x.id === store.activeTpl)?.name || 'Standard')}”.`}${t.is_default ? ' This is the default: if the template in use is deleted, the dealership switches back to it.' : ''}</p></section>
+ <div class="cols tplcols"><div class="stack">
+  <section class="panel"><h2>Blocks</h2><p class="muted small" style="margin:0 0 10px">Drag to reorder, or use the arrows. Click a block to edit it.</p>
+   <ol class="blocks">${dr.blocks.map((b, i) => `<li class="blk ${ed.sel === b.id ? 'on' : ''}" draggable="true" data-blk="${b.id}">
+     <div class="blkhead" data-pick="${b.id}" tabindex="0" role="button" aria-expanded="${ed.sel === b.id}"><span class="grip" aria-hidden="true">⋮⋮</span><span class="blkname"><b>${BLOCKS[b.type]}</b><small>${esc(blockSummary(b))}</small></span>${b.showFor && b.showFor !== 'all' ? `<span class="chip test">${SHOW_FOR.find(x => x[0] === b.showFor)[1]}</span>` : ''}
+     <span class="blkbtns"><button class="btn sm" data-up="${i}" ${i ? '' : 'disabled'} aria-label="Move ${BLOCKS[b.type]} up">↑</button><button class="btn sm" data-down="${i}" ${i < dr.blocks.length - 1 ? '' : 'disabled'} aria-label="Move ${BLOCKS[b.type]} down">↓</button><button class="btn sm" data-rm="${i}" aria-label="Remove ${BLOCKS[b.type]}">✕</button></span></div>
+     ${ed.sel === b.id ? `<div class="blkbody" data-body="${b.id}">${blockSettings(b)}</div>` : ''}</li>`).join('')}</ol>
+   <div class="inl" style="margin-top:12px"><select id="addtype" aria-label="Block to add">${options(Object.entries(BLOCKS), 'text')}</select><button class="btn" id="addblk">Add block</button></div></section>
+  <details class="panel fold" data-fold="tstyle" ${fold.tstyle ? 'open' : ''}><summary><span>Fonts and colors</span></summary>
+   <div class="form two" style="margin-top:12px">${fld('Font', `<select data-style="font">${options(FONTS.map(f => [f, f]), st.font)}</select>`, 'Web-safe fonts only, so every inbox shows them.')}${fld('Text size', `<select data-style="fontSize">${options([14, 15, 16, 17, 18].map(n => [n, n + 'px']), st.fontSize)}</select>`)}</div>
+   <div class="colors">${colorF('textColor', 'Text')}${colorF('linkColor', 'Links')}${colorF('background', 'Background')}${colorF('buttonColor', 'Main button')}${colorF('buttonColor2', 'Other buttons')}</div></details>
+ </div>
+ <section class="panel tplprev"><div class="prevhead"><h2>Preview</h2><div class="seg" role="group" aria-label="Preview with">${[['vehicle', 'Vehicle found'], ['unavailable', 'Unavailable'], ['service', 'Service']].map(([k, l]) => `<button class="${ed.sample === k ? 'on' : ''}" aria-pressed="${ed.sample === k}" data-sample="${k}">${l}</button>`).join('')}</div></div>
+  <p class="muted small" style="margin:0 0 10px">Sample customer Alex. Name, phones and address come from ${esc(store.name)}’s dealership page.</p><div id="tprev" class="emailframe"></div></section></div>`;
 }
 function viewCache() {
   const rows = cache.filter(c => c.vin.toLowerCase().includes(cacheQ.trim().toLowerCase().replace(/\s+/g, '')));
@@ -409,8 +488,74 @@ function showErrors(errors) {
   document.querySelector('.field.err input,.field.err .dd-btn')?.focus();
 }
 const saveForm = fn => async () => { try { await fn(); } catch (e) { if (e.errors) showErrors(e.errors); else toast(e.message); } };
-const templateValues = () => ({ reasons: $('#t-reasons').value, buttons: $('#t-btn').value, links: $('#t-links').value, logoUrl: $('#t-logo').value, buildingPhotoUrl: $('#t-bldg').value });
-async function drawPreview() { const r = await api('POST', '/api/templates/preview', { dealerId: tplSel, template: templateValues(), sample: $('#t-lead').value }); $('#tprev').innerHTML = r.html; }
+async function drawPreview() {
+  if (!ed.draft || !$('#tprev')) return;
+  try { const r = await api('POST', '/api/templates/preview', { dealerId: ed.dealer, template: ed.draft, sample: ed.sample }); $('#tprev').innerHTML = r.html; }
+  catch (e) { $('#tprev').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+const previewSoon = () => { clearTimeout(drawPreview.t); drawPreview.t = setTimeout(act(drawPreview), 250); };
+function nameBox(title, initial, onOk) {
+  const close = showModal(`<form class="dlg" role="dialog" aria-modal="true" aria-labelledby="nt" id="nf"><h2 id="nt">${esc(title)}</h2><div class="field"><label for="nn">Template name</label><input id="nn" value="${esc(initial)}" maxlength="60"></div><p class="err-msg" id="ne" style="color:var(--bad)"></p><div class="acts"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary">Create</button></div></form>`, '#nn');
+  $('#nf').onsubmit = async e => { e.preventDefault(); try { await onOk($('#nn').value); close(); } catch (err) { $('#ne').textContent = err.message; } };
+}
+function bindTemplates(v) {
+  const dr = ed.draft; if (!dr) return;
+  const mark = () => { if (!ed.dirty) { ed.dirty = true; const h = v.querySelector('.head .acts'); if (h && !h.querySelector('.chip')) h.insertAdjacentHTML('afterbegin', '<span class="chip fallback">Unsaved changes</span>'); } previewSoon(); };
+  const redraw = () => { const y = scrollY; router(); scrollTo(0, y); };
+  $('#tsel').onchange = e => { const next = +e.target.value; e.target.value = ed.dealer; guard(() => { ed.dealer = next; ed.id = null; router(); }); };
+  v.querySelectorAll('[data-tpl]').forEach(b => b.onclick = () => guard(() => { openTemplate(+b.dataset.tpl); router(); }));
+  $('#tplname').oninput = e => { dr.name = e.target.value; mark(); };
+  $('#savetpl').onclick = act(async () => { await api('PUT', '/api/email-templates/' + ed.id, dr); ed.dirty = false; await load(); openTemplate(ed.id); redraw(); toast('Template saved'); });
+  $('#tplnew').onclick = () => guard(() => nameBox('New template', '', async name => { const { id } = await api('POST', '/api/email-templates', { dealerId: ed.dealer, name }); await load(); openTemplate(id); router(); toast('Template created from the default'); }));
+  $('#tpldup').onclick = () => guard(() => nameBox('Duplicate template', `${dr.name} copy`, async name => { const { id } = await api('POST', '/api/email-templates', { dealerId: ed.dealer, name, copyFrom: ed.id }); await load(); openTemplate(id); router(); toast('Template duplicated'); }));
+  const use = $('#tpluse'); if (use) use.onclick = act(async () => { if (ed.dirty) await api('PUT', '/api/email-templates/' + ed.id, dr); ed.dirty = false; await api('POST', `/api/email-templates/${ed.id}/use`); await load(); redraw(); toast('Replies now use this template'); });
+  $('#tpldel').onclick = () => confirmBox(`Delete “${dr.name}”?`, dealers.find(d => d.id === ed.dealer).activeTpl === ed.id ? 'This dealership replies with this template right now. It will switch to its default template.' : 'This can’t be undone.', 'Delete', act(async () => { await api('DELETE', '/api/email-templates/' + ed.id); ed.dirty = false; ed.id = null; await load(); router(); toast('Template deleted'); }));
+  v.querySelectorAll('[data-sample]').forEach(b => b.onclick = () => { ed.sample = b.dataset.sample; v.querySelectorAll('[data-sample]').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', x === b); }); act(drawPreview)(); });
+  // Blocks: pick, move, remove, add, drag.
+  v.querySelectorAll('[data-pick]').forEach(h => { const pick = e => { if (e.target.closest('button')) return; ed.sel = ed.sel === h.dataset.pick ? null : h.dataset.pick; redraw(); }; h.onclick = pick; h.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(e); } }; });
+  const move = (from, to) => { const [b] = dr.blocks.splice(from, 1); dr.blocks.splice(to, 0, b); mark(); redraw(); };
+  v.querySelectorAll('[data-up]').forEach(b => b.onclick = () => move(+b.dataset.up, +b.dataset.up - 1));
+  v.querySelectorAll('[data-down]').forEach(b => b.onclick = () => move(+b.dataset.down, +b.dataset.down + 1));
+  v.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { const blk = dr.blocks[+b.dataset.rm]; confirmBox(`Remove the ${BLOCKS[blk.type]} block?`, 'You can add it back from Add block. Nothing changes until you save.', 'Remove', () => { dr.blocks.splice(+b.dataset.rm, 1); mark(); redraw(); }); });
+  $('#addblk').onclick = () => { const b = freshBlock($('#addtype').value); dr.blocks.push(b); ed.sel = b.id; mark(); redraw(); v.querySelector(`[data-blk="${b.id}"]`)?.scrollIntoView({ block: 'center' }); };
+  let dragFrom = null;
+  v.querySelectorAll('[data-blk]').forEach(li => {
+    li.ondragstart = e => { if (e.target.closest('input,textarea,select')) { e.preventDefault(); return; } dragFrom = dr.blocks.findIndex(b => b.id === li.dataset.blk); li.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; };
+    li.ondragend = () => li.classList.remove('dragging');
+    li.ondragover = e => { e.preventDefault(); li.classList.add('dropto'); };
+    li.ondragleave = () => li.classList.remove('dropto');
+    li.ondrop = e => { e.preventDefault(); li.classList.remove('dropto'); const to = dr.blocks.findIndex(b => b.id === li.dataset.blk); if (dragFrom != null && to !== dragFrom) move(dragFrom, to); dragFrom = null; };
+  });
+  // Typing in a block's settings updates the draft without redrawing, so focus stays put.
+  const body = v.querySelector('[data-body]');
+  if (body) {
+    const b = dr.blocks.find(x => x.id === body.dataset.body); let lastField = null;
+    body.querySelectorAll('[data-k]').forEach(el => {
+      el.onfocus = () => { if (el.matches('input:not([type=number]),textarea')) lastField = el; };
+      const update = () => {
+        const k = el.dataset.k, val = el.value;
+        if (k === 'items') b.items = val.split('\n').map(x => x.trim()).filter(Boolean);
+        else if (k === 'btn-label') b.items[+el.dataset.i].label = val;
+        else if (k === 'btn-url') b.items[+el.dataset.i].url = val.trim();
+        else if (k === 'bold') b.bold = val === '1';
+        else if (k === 'logoWidth' || k === 'size') b[k] = +val;
+        else b[k] = val;
+        const sum = v.querySelector(`[data-blk="${b.id}"] .blkname small`); if (sum) sum.textContent = blockSummary(b);
+        mark();
+      };
+      el.oninput = update; el.onchange = () => { update(); if (el.dataset.k === 'showFor') redraw(); };
+    });
+    body.querySelectorAll('[data-ph]').forEach(btn => { btn.onmousedown = e => e.preventDefault(); btn.onclick = () => {
+      const f = lastField || body.querySelector('textarea,input:not([type=number])'); if (!f) return;
+      const a = f.selectionStart ?? f.value.length, z = f.selectionEnd ?? a;
+      f.value = f.value.slice(0, a) + btn.dataset.ph + f.value.slice(z); f.focus(); f.setSelectionRange(a + btn.dataset.ph.length, a + btn.dataset.ph.length); f.dispatchEvent(new Event('input'));
+    }; });
+    const addb = body.querySelector('[data-btnadd]'); if (addb) addb.onclick = () => { b.items.push({ label: '', url: '' }); mark(); redraw(); };
+    body.querySelectorAll('[data-btnrm]').forEach(x => x.onclick = () => { b.items.splice(+x.dataset.btnrm, 1); mark(); redraw(); });
+  }
+  v.querySelectorAll('[data-style]').forEach(el => { const up = () => { const k = el.dataset.style; dr.style[k] = k === 'fontSize' ? +el.value : el.value; const c = el.parentElement.querySelector('code'); if (c) c.textContent = el.value; mark(); }; el.oninput = up; el.onchange = up; });
+  act(drawPreview)();
+}
 const saveSettings = over => api('PUT', '/api/settings', { customerTexts: settings.customer_texts, testEmail: $('#s-mail')?.value ?? settings.owner_test_email, testPhone: $('#s-phone')?.value ?? settings.owner_test_phone, modelEnabled: settings.model_enabled, provider: settings.model_provider, model: settings.model_id, modelTimeout: $('#aito')?.value ?? settings.model_timeout_seconds, photoTimeout: $('#s-photo')?.value ?? settings.photo_timeout_seconds, ...over });
 
 function bind() {
@@ -440,13 +585,7 @@ function bind() {
   v.querySelectorAll('[data-deact]').forEach(b => b.onclick = e => { e.stopPropagation(); askDeactivate(+b.dataset.deact); });
   v.querySelectorAll('[data-react]').forEach(b => b.onclick = act(async e => { e.stopPropagation(); await setFlag(+b.dataset.react, { active: true }); toast('Reactivated'); location.hash = 'dealerships'; router(); }));
   const ad = v.querySelector('[data-add]'); if (ad) ad.onclick = () => { location.hash = 'dealership-new'; };
-  const ts = $('#tsel'); if (ts) {
-    ts.onchange = () => { tplSel = +ts.value; router(); };
-    ['t-reasons', 't-btn', 't-links', 't-logo', 't-bldg'].forEach(id => { $('#' + id).oninput = () => { clearTimeout(bind.t); bind.t = setTimeout(act(drawPreview), 250); }; });
-    $('#t-lead').onchange = act(drawPreview);
-    $('#savetpl').onclick = act(async () => { await api('PUT', '/api/templates/' + tplSel, templateValues()); await load(); toast('Template saved'); });
-    act(drawPreview)();
-  }
+  if ($('#savetpl')) bindTemplates(v);
   const lq = $('#lq'); if (lq) {
     lq.oninput = e => { logF.q = e.target.value; drawLog(); };
     $('#ld').onchange = e => { logF.d = e.target.value; drawLog(); }; $('#lt').onchange = e => { logF.t = e.target.value; drawLog(); };

@@ -17,6 +17,7 @@ async function openDashboard() {
   const dom = new JSDOM(html, { url: 'http://localhost/', runScripts: 'outside-only', pretendToBeVisual: true, virtualConsole });
   const w = dom.window as any;
   w.Element.prototype.scrollIntoView = () => {};
+  w.scrollTo = () => {};
   w.fetch = async (url: string, init: any = {}) => {
     const response = await app.inject({
       url, method: init.method ?? 'GET', headers: init.headers ?? {}, payload: init.body,
@@ -126,6 +127,38 @@ describe('dashboard screens', () => {
     s.w.document.querySelector('#view tbody tr').click();
     await s.settle();
     expect(title(s)).toBe('Incoming leads');
+    expect(s.errors).toEqual([]);
+    await s.close();
+  });
+
+  it('creates, edits, saves and deletes a template', async () => {
+    const s = await openDashboard();
+    await go(s, 'leads');
+    s.w.document.querySelector('#sim').click();
+    await s.settle(); await s.settle();
+    await go(s, 'templates');
+    await s.settle();
+    const tabs = () => [...s.w.document.querySelectorAll('.tpltab')].map((t: any) => t.textContent.replace(/\s+/g, ' ').trim());
+    expect(tabs()).toEqual(['Standard In use Default']);
+    expect(s.w.document.querySelector('#tprev').textContent).toContain('Hi Alex,');
+    s.w.document.querySelector('#tplnew').click();
+    s.w.document.querySelector('#nn').value = 'Holiday';
+    s.w.document.querySelector('#nf').dispatchEvent(new s.w.Event('submit', { cancelable: true }));
+    await s.settle(); await s.settle();
+    expect(tabs()).toEqual(['Standard In use Default', 'Holiday']);
+    s.w.document.querySelector('#addblk').click();
+    const area = s.w.document.querySelector('[data-body] textarea[data-k="text"]');
+    area.value = 'Holiday pricing ends Sunday';
+    area.dispatchEvent(new s.w.Event('input'));
+    s.w.document.querySelector('#savetpl').click();
+    await s.settle(); await s.settle();
+    s.w.document.querySelector('#tpluse').click();
+    await s.settle(); await s.settle();
+    expect(tabs()).toEqual(['Standard Default', 'Holiday In use']);
+    s.w.document.querySelector('#tpldel').click();
+    s.w.document.querySelector('#mp').click();
+    await s.settle(); await s.settle();
+    expect(tabs()).toEqual(['Standard In use Default']);
     expect(s.errors).toEqual([]);
     await s.close();
   });

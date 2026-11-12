@@ -1,6 +1,8 @@
 import type { Db } from '../db.ts';
 import { ELEAD_SENDER, looksLikeLead, parseElead } from './parseElead.ts';
-import { NON_VEHICLE_TYPES, buildReply, replySubject } from './replyEmail.ts';
+import { NON_VEHICLE_TYPES, replySubject } from './replyEmail.ts';
+import { renderTemplate } from './blocks.ts';
+import { templateFor } from '../templates.ts';
 import { normalizePhone } from '../sms.ts';
 import { staffText } from './staffText.ts';
 
@@ -172,7 +174,8 @@ export async function answerLead(db: Db, services: Services, leadId: number): Pr
   if (!claimed) return;
   const lead = claimed;
   const [store] = await db.query('SELECT * FROM dealerships WHERE id = $1', [lead.dealership_id]);
-  const [template] = await db.query('SELECT * FROM templates WHERE dealership_id = $1', [store.id]);
+  // The dealership's chosen template (its default if none is chosen).
+  const template = await templateFor(db, store.id);
 
   const testMode = store.test_mode as boolean;
   const to = testMode ? settings.owner_test_email : store.passthrough;
@@ -216,9 +219,9 @@ export async function answerLead(db: Db, services: Services, leadId: number): Pr
     await raiseAlert(db, { severity: 'fallback', title: 'Model reply failed', body: 'The model was slow or failed, so the standard reply went out.', link: '#controls', cta: 'Check settings' });
   }
 
-  const reply = buildReply(
+  const reply = renderTemplate(
     { name: store.name, website: store.website, salesPhone: store.sales_phone, servicePhone: store.service_phone, address: store.address },
-    { reasons: template?.reasons ?? '', buttons: template?.buttons ?? '', logoUrl: template?.logo_url ?? '', buildingPhotoUrl: template?.building_photo_url ?? '', links: template?.links ?? '' },
+    template,
     { firstName: lead.first_name, year: lead.year, make: lead.make, model: lead.model, trim: lead.trim, vin: lead.vin, stock: lead.stock, leadType: lead.lead_type },
     photos,
     greetingResult.status === 'fulfilled' ? greetingResult.value : '',

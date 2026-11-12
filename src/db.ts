@@ -91,6 +91,19 @@ CREATE TABLE IF NOT EXISTS text_messages (
 );
 -- Each dealership chooses how staff texts look: 'formatted' or 'raw'.
 ALTER TABLE dealerships ADD COLUMN IF NOT EXISTS staff_text_format TEXT NOT NULL DEFAULT 'formatted';
+-- Email templates: several per dealership, built from blocks. One is in use;
+-- the default can't be deleted, and takes over when the one in use is deleted.
+CREATE TABLE IF NOT EXISTS email_templates (
+  id SERIAL PRIMARY KEY,
+  dealership_id INTEGER NOT NULL REFERENCES dealerships(id),
+  name TEXT NOT NULL,
+  is_default BOOLEAN NOT NULL DEFAULT FALSE,
+  blocks JSONB NOT NULL DEFAULT '[]',
+  style JSONB NOT NULL DEFAULT '{}',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS email_templates_one_default ON email_templates (dealership_id) WHERE is_default;
+ALTER TABLE dealerships ADD COLUMN IF NOT EXISTS active_template_id INTEGER;
 -- Added for Twilio: its message ID links delivery updates back to the text.
 ALTER TABLE text_messages ADD COLUMN IF NOT EXISTS twilio_sid TEXT NOT NULL DEFAULT '';
 ALTER TABLE text_messages ADD COLUMN IF NOT EXISTS failure TEXT NOT NULL DEFAULT '';

@@ -3,7 +3,8 @@ import type { Db } from './db.ts';
 import { ELEAD_SENDER } from './lead/parseElead.ts';
 import { answerLead } from './lead/pipeline.ts';
 import type { Services } from './lead/pipeline.ts';
-import { buildReply } from './lead/replyEmail.ts';
+import { TemplateError, cleanTemplate, renderTemplate } from './lead/blocks.ts';
+import { createTemplate, deleteTemplate, ensureDefault, listTemplates, saveTemplate, useTemplate } from './templates.ts';
 import { normalizePhone } from './sms.ts';
 import { RANGES, monitorData } from './monitor.ts';
 import type { Range } from './monitor.ts';
@@ -51,7 +52,7 @@ export function registerApi(app: FastifyInstance, db: Db, services: Services, de
   app.get('/api/state', async () => {
     const [dealers, templates, leads, events, texts, alerts, cache, settings] = await Promise.all([
       db.query('SELECT * FROM dealerships ORDER BY name'),
-      db.query('SELECT * FROM templates'),
+      listTemplates(db),
       db.query(`SELECT l.*, r.kind, r.status, r.failure, r.seconds, r.from_address, r.to_address, r.subject AS reply_subject,
                   r.html, r.text_body, r.photo_count, r.photo_source
                 FROM leads l LEFT JOIN responses r ON r.lead_id = l.id ORDER BY l.received_at DESC LIMIT 1000`),
@@ -93,7 +94,7 @@ export function registerApi(app: FastifyInstance, db: Db, services: Services, de
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
       [d.name, d.website, d.mailbox, d.crm, d.passthrough, d.sales, d.service, d.address, staff.saved, d.textFormat],
     );
-    await db.query('INSERT INTO templates (dealership_id) VALUES ($1)', [row.id]);
+    await ensureDefault(db, row.id);
     await db.query(
       `INSERT INTO alerts (dealership_id, severity, title, body, link, cta) VALUES ($1, 'fallback', $2, $3, $4, 'Connect')`,
       [row.id, `Connect Google: ${d.name}`, 'The app can’t read or reply from this mailbox until you connect Google.', `#dealership-${row.id}`],
@@ -124,25 +125,68 @@ export function registerApi(app: FastifyInstance, db: Db, services: Services, de
     return { ok: true };
   });
 
-  app.put<{ Params: { id: string }; Body: any }>('/api/templates/:id', async (request) => {
-    const t = request.body as any;
-    await db.query(
-      `UPDATE templates SET reasons=$2, buttons=$3, logo_url=$4, building_photo_url=$5, links=$6 WHERE dealership_id=$1`,
-      [request.params.id, t.reasons ?? '', t.buttons ?? '', t.logoUrl ?? '', t.buildingPhotoUrl ?? '', t.links ?? ''],
-    );
-    return { ok: true };
-  });
-
   // The preview uses the same builder as real emails, so it can't drift from them.
-  app.post<{ Body: any }>('/api/templates/preview', async (request) => {
+  app.post<{ Body: any }>('/api/templates/preview', async (request, reply) => {
     const { dealerId, template, sample } = request.body as any;
     const [s] = await db.query('SELECT * FROM dealerships WHERE id = $1', [dealerId]);
     if (!s) return { html: '' };
+    let clean;
+    try { clean = cleanTemplate(template); } catch (error) {
+      if (error instanceof TemplateError) return reply.code(400).send({ error: error.message });
+      throw error;
+    }
     const store = { name: s.name, website: s.website, salesPhone: s.sales_phone, servicePhone: s.service_phone, address: s.address };
-    const lead = sample === 'fallback' ? { ...SAMPLE_LEAD, vin: '', stock: '', leadType: 'New Vehicle' } : SAMPLE_LEAD;
+    const lead = sample === 'unavailable' ? { ...SAMPLE_LEAD, vin: '', stock: '', leadType: 'New Vehicle' }
+      : sample === 'service' ? { ...SAMPLE_LEAD, year: null, make: '', model: '', trim: '', vin: '', stock: '', leadType: 'Service' }
+      : SAMPLE_LEAD;
     const photo = 'https://preview.invalid/photo.jpg';
-    const { html } = buildReply(store, template, lead, sample === 'fallback' ? [] : [photo, photo, photo]);
+    const { html } = renderTemplate(store, clean, lead, sample === 'vehicle' || !sample ? [photo, photo, photo] : []);
     return { html: html.replaceAll(photo, PREVIEW_PHOTO) };
+  });
+
+  const templateName = async (dealerId: number, name: unknown, exceptId = 0) => {
+    const clean = String(name ?? '').trim().slice(0, 60);
+    if (!clean) return { error: 'Give the template a name.' };
+    const [taken] = await db.query('SELECT id FROM email_templates WHERE dealership_id = $1 AND lower(name) = lower($2) AND id <> $3', [dealerId, clean, exceptId]);
+    return taken ? { error: 'This dealership already has a template with that name.' } : { name: clean };
+  };
+
+  app.post<{ Body: any }>('/api/email-templates', async (request, reply) => {
+    const b = request.body as any;
+    const dealerId = Number(b.dealerId);
+    const [store] = await db.query('SELECT id FROM dealerships WHERE id = $1', [dealerId]);
+    if (!store) return reply.code(404).send({ error: 'That dealership no longer exists.' });
+    const named = await templateName(dealerId, b.name);
+    if (named.error) return reply.code(400).send({ error: named.error });
+    return { id: await createTemplate(db, dealerId, named.name!, Number(b.copyFrom) || undefined) };
+  });
+
+  app.put<{ Params: { id: string }; Body: any }>('/api/email-templates/:id', async (request, reply) => {
+    const id = Number(request.params.id);
+    const [t] = await db.query('SELECT dealership_id FROM email_templates WHERE id = $1', [id]);
+    if (!t) return reply.code(404).send({ error: 'That template no longer exists.' });
+    const b = request.body as any;
+    const named = await templateName(t.dealership_id, b.name, id);
+    if (named.error) return reply.code(400).send({ error: named.error });
+    try {
+      await saveTemplate(db, id, named.name!, cleanTemplate(b));
+    } catch (error) {
+      if (error instanceof TemplateError) return reply.code(400).send({ error: error.message });
+      throw error;
+    }
+    return { ok: true };
+  });
+
+  app.post<{ Params: { id: string } }>('/api/email-templates/:id/use', async (request, reply) => {
+    if (!(await useTemplate(db, Number(request.params.id)))) return reply.code(404).send({ error: 'That template no longer exists.' });
+    return { ok: true };
+  });
+
+  app.delete<{ Params: { id: string } }>('/api/email-templates/:id', async (request, reply) => {
+    const result = await deleteTemplate(db, Number(request.params.id));
+    if (result === 'missing') return reply.code(404).send({ error: 'That template no longer exists.' });
+    if (result === 'default') return reply.code(400).send({ error: 'The default template can’t be deleted. It is what each dealership falls back to.' });
+    return { ok: true };
   });
 
   app.post<{ Body: { sending: boolean } }>('/api/sending', async (request) => {
