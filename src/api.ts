@@ -5,6 +5,8 @@ import { answerLead } from './lead/pipeline.ts';
 import type { Services } from './lead/pipeline.ts';
 import { buildReply } from './lead/replyEmail.ts';
 import { normalizePhone } from './sms.ts';
+import { RANGES, monitorData } from './monitor.ts';
+import type { Range } from './monitor.ts';
 
 const EMAIL = /^\S+@\S+\.\S+$/;
 
@@ -60,6 +62,13 @@ export function registerApi(app: FastifyInstance, db: Db, services: Services, de
       db.query('SELECT * FROM settings'),
     ]);
     return { dealers, templates, leads, events, texts, alerts, cache, settings: settings[0], dev, connections };
+  });
+
+  // The Monitor screen: totals for a time range, optionally for one dealership.
+  app.get<{ Querystring: { range?: string; dealer?: string } }>('/api/monitor', async (request) => {
+    const range = (RANGES as string[]).includes(request.query.range ?? '') ? (request.query.range as Range) : 'today';
+    const dealer = Number(request.query.dealer);
+    return monitorData(db, range, Number.isInteger(dealer) && dealer > 0 ? dealer : null);
   });
 
   app.post('/api/dealerships', async (request, reply) => {

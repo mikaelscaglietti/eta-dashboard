@@ -6,6 +6,7 @@ const AI_MODELS = { OpenAI: [['gpt-5.6-luna', 'GPT-5.6 Luna (fast, low cost)'], 
 const statusLabel = { replied: 'Replied', fallback: 'Replied (fallback)', failed: 'Failed', test: 'Test mode', held: 'Held (paused)', queued: 'Working' };
 
 let dealers = [], tpl = {}, leads = [], alerts = [], cache = [], settings = {}, dev = false, sending = true, conns = { twilio: { connected: false, from: '' } };
+let mon = null, monF = { range: 'today', d: 'all' };
 let filt = { d: 'all', s: 'all', q: '' }, logF = { q: '', d: 'all', t: 'all' }, tplSel = null, cacheQ = '', fold = { safety: true, ai: false, conn: true }, pvList = [];
 
 const $ = s => document.querySelector(s);
@@ -24,7 +25,8 @@ const dayOf = date => new Intl.DateTimeFormat('en-US', { timeZone: ZONE, month: 
 const timeOf = date => new Intl.DateTimeFormat('en-US', { timeZone: ZONE, hour: 'numeric', minute: '2-digit' }).format(date);
 
 async function load() {
-  const s = await api('GET', '/api/state');
+  const [s, m] = await Promise.all([api('GET', '/api/state'), loadMonitor()]);
+  mon = m;
   settings = s.settings; sending = s.settings.sending; dev = s.dev; conns = s.connections || conns; cache = s.cache.map(c => ({ ...c, when: `${dayOf(new Date(c.last_scraped))}, ${timeOf(new Date(c.last_scraped))}` }));
   alerts = s.alerts.map(a => ({ ...a, sev: a.severity }));
   dealers = s.dealers.map(d => ({ id: d.id, name: d.name, mailbox: d.mailbox, passthrough: d.passthrough, site: d.website, staff: d.staff_phones, active: d.active, test: d.test_mode, sales: d.sales_phone, service: d.service_phone, address: d.address, google: d.google_status, crm: d.crm, textFormat: d.staff_text_format || 'formatted' }));
@@ -39,12 +41,13 @@ async function load() {
 
 /* ---------- chrome ---------- */
 const icons = {
+  monitor: '<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>',
   leads: '<path d="M3 12h4l3-8 4 16 3-8h4"/>', log: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
   alerts: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21a2 2 0 0 0 4 0"/>', dealerships: '<path d="M3 21V9l9-6 9 6v12"/><path d="M9 21v-6h6v6"/>',
   templates: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m3 8 9 6 9-6"/>', cache: '<rect x="3" y="3" width="18" height="14" rx="2"/><path d="m3 14 5-5 5 5 3-3 5 5"/><path d="M8 21h8"/>',
   controls: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/>'
 };
-const navItems = [['leads', 'Incoming leads'], ['log', 'Response log'], ['dealerships', 'Dealerships'], ['deactivated', 'Deactivated', 'sub'], ['templates', 'Templates'], ['cache', 'Vehicle cache'], ['controls', 'Settings'], ['alerts', 'Alerts']];
+const navItems = [['monitor', 'Monitor'], ['leads', 'Incoming leads'], ['log', 'Response log'], ['dealerships', 'Dealerships'], ['deactivated', 'Deactivated', 'sub'], ['templates', 'Templates'], ['cache', 'Vehicle cache'], ['controls', 'Settings'], ['alerts', 'Alerts']];
 const sw = (on, id) => `<button class="sw" role="switch" aria-checked="${on}" data-sw="${id}" aria-label="toggle"></button>`;
 const options = (list, current) => list.map(([v, l]) => `<option value="${esc(v)}" ${String(current) === String(v) ? 'selected' : ''}>${esc(l)}</option>`).join('');
 
@@ -117,9 +120,7 @@ function viewLog() {
  <p class="muted" style="margin-top:12px">The dealership list shows active stores only. Choosing “All dealerships” also includes past responses from stores that are now off.</p>`;
 }
 function viewAlerts() {
-  const td = leads.filter(l => !l.date), ok = td.filter(l => l.secs != null);
-  const avg = ok.length ? (ok.reduce((a, l) => a + l.secs, 0) / ok.length).toFixed(1) : '0.0';
-  return `<h1>Alerts</h1><p class="sub">Things that need your attention.</p><p class="stats" style="display:flex"><span class="stat"><b>${td.length}</b><span>Leads today</span></span><span class="stat"><b>${avg}s</b><span>Average response time</span></span><span class="stat"><b>${td.filter(l => l.status === 'failed').length}</b><span>Failed</span></span></p><div class="panel" style="padding:0">${alerts.length ? alerts.map(a => `<div class="alert"><span class="chip ${esc(a.sev)}">${a.sev === 'failed' ? 'Needs fixing' : 'Check'}</span><div><b>${esc(a.title)}</b><p>${esc(a.body)}</p></div><a class="btn sm" href="${esc(a.link)}" style="text-decoration:none;color:inherit">${esc(a.cta)}</a><button class="btn sm" data-dismiss="${a.id}">Dismiss</button></div>`).join('') : '<div class="empty">All clear. New problems will show up here.</div>'}</div>`;
+  return `<h1>Alerts</h1><p class="sub">Only problems to fix. Today’s numbers are on the Monitor.</p><div class="panel" style="padding:0">${alerts.length ? alerts.map(a => `<div class="alert"><span class="chip ${esc(a.sev)}">${a.sev === 'failed' ? 'Needs fixing' : 'Check'}</span><div><b>${esc(a.title)}</b><p>${esc(a.body)}</p></div><a class="btn sm" href="${esc(a.link)}" style="text-decoration:none;color:inherit">${esc(a.cta)}</a><button class="btn sm" data-dismiss="${a.id}">Dismiss</button></div>`).join('') : '<div class="empty">All clear. New problems will show up here.</div>'}</div>`;
 }
 const googleChip = g => g === 'ok' ? '<span class="chip replied">Connected</span>' : g === 'new' ? '<span class="chip test">Not connected</span>' : '<span class="chip failed">Expired</span>';
 function viewDealers() {
@@ -301,10 +302,84 @@ function enhanceSelects(root) {
   });
 }
 
+/* ---------- monitor ---------- */
+const RANGE_LABEL = { today: 'Today', '7d': 'Last 7 days', '30d': 'Last 30 days' };
+const loadMonitor = () => api('GET', `/api/monitor?range=${monF.range}${monF.d === 'all' ? '' : '&dealer=' + monF.d}`);
+const secs = v => v == null ? '–' : `${Number(v).toFixed(1)}s`;
+const hourName = h => `${h % 12 || 12}${h < 12 ? 'a' : 'p'}`;
+const hourLong = h => `${h % 12 || 12}${h < 12 ? ' AM' : ' PM'}`;
+function ago(at) {
+  if (!at) return { text: 'No leads yet', quiet: true };
+  const min = Math.round((Date.now() - new Date(at).getTime()) / 60000);
+  const text = min < 1 ? 'Just now' : min < 60 ? `${min} min ago` : min < 1440 ? `${Math.round(min / 60)} hr ago` : `${Math.round(min / 1440)} day${min < 2880 ? '' : 's'} ago`;
+  return { text, quiet: min >= 1440 };
+}
+// Clicking a number opens the list behind it. Incoming leads covers today; the Response log covers longer ranges.
+function drill({ d = monF.d, s = 'all', t = 'all', log = false }) {
+  if (log || monF.range !== 'today') { logF.d = String(d); logF.t = t; logF.q = ''; location.hash = 'log'; }
+  else { filt.d = String(d); filt.s = s; filt.q = ''; location.hash = 'leads'; }
+}
+const dj = o => esc(JSON.stringify(o));
+function tile(label, value, sub, target) {
+  return `<div class="tile click" tabindex="0" role="link" data-drill="${dj(target)}"><span>${label}</span><b class="tnum">${value}</b><small>${sub}</small></div>`;
+}
+function typeChart(types) {
+  const by = Object.fromEntries(types.map(t => [t.type, t]));
+  const rows = [...LEAD_TYPES, ...types.map(t => t.type).filter(t => !LEAD_TYPES.includes(t))].map(t => ({ t: t || 'Unknown', r: by[t]?.received ?? 0, a: by[t]?.responded ?? 0 }));
+  const max = Math.max(1, ...rows.map(x => x.r));
+  return `<div class="legend"><span><i class="sw1"></i>Received</span><span><i class="sw2"></i>Responded</span></div>
+  <div class="hbars">${rows.map(x => `<div class="hrow click" tabindex="0" role="link" data-drill="${dj({ t: x.t, log: true })}" data-tip="${esc(`${x.t}: ${x.r} received, ${x.a} responded`)}"><span class="hl">${esc(x.t)}</span>
+   <div class="hb"><div class="bar s1" style="width:${x.r / max * 100}%"></div><em class="tnum">${x.r}</em></div>
+   <div class="hb"><div class="bar s2" style="width:${x.a / max * 100}%"></div><em class="tnum">${x.a}</em></div></div>`).join('')}</div>`;
+}
+function hourChart(hours, fast) {
+  const by = Object.fromEntries(hours.map(h => [h.hour, h]));
+  const all = Array.from({ length: 24 }, (_, h) => ({ h, n: by[h]?.received ?? 0, avg: by[h]?.avg_seconds ?? null }));
+  const max = Math.max(1, ...all.map(x => x.n)), slow = all.filter(x => x.avg != null && x.avg >= fast);
+  return `<div class="legend"><span><i class="sw1"></i>Leads received</span>${slow.length ? `<span class="slowkey">▲ Average reply ${fast}s or slower</span>` : ''}</div>
+  <div class="vchart"><div class="vgrid"><span class="tnum">${max}</span><span class="tnum">0</span></div><div class="vbars">${all.map(x => `<div class="vcol" tabindex="0" data-tip="${esc(`${hourLong(x.h)}: ${x.n} lead${x.n === 1 ? '' : 's'}${x.avg != null ? `, average reply ${x.avg.toFixed(1)}s` : ''}`)}">${x.avg != null && x.avg >= fast ? '<b class="slowmark" aria-label="slow">▲</b>' : ''}<div class="bar s1" style="height:${x.n / max * 100}%"></div></div>`).join('')}</div></div>
+  <div class="vaxis">${all.map(x => `<span>${x.h % 3 === 0 ? hourName(x.h) : ''}</span>`).join('')}</div>
+  <p class="muted small">${monF.range === 'today' ? 'Today, by hour (Arizona time).' : `${RANGE_LABEL[monF.range]}, added up by hour of the day (Arizona time).`}</p>`;
+}
+function viewMonitor() {
+  if (!mon) return '<h1>Monitor</h1><div class="empty">Loading…</div>';
+  const t = mon.totals, under = t.responded ? Math.round(t.fast / t.responded * 100) : null;
+  const dn = monF.d === 'all' ? 'All dealerships' : dName(+monF.d);
+  return `<div class="head"><div><h1>Monitor</h1><p class="sub">Is every dealership getting answered? ${esc(RANGE_LABEL[monF.range])} · ${esc(dn)}</p></div></div>
+ <div class="filters"><div class="seg" role="group" aria-label="Time range">${Object.entries(RANGE_LABEL).map(([k, l]) => `<button class="${monF.range === k ? 'on' : ''}" aria-pressed="${monF.range === k}" data-range="${k}">${l}</button>`).join('')}</div>
+  <select id="md" aria-label="Dealership"><option value="all">All dealerships</option>${options(dealers.filter(d => d.active).map(d => [d.id, d.name]), monF.d)}</select></div>
+ <div class="tiles">
+  ${tile('Leads received', t.received, esc(RANGE_LABEL[monF.range]), {})}
+  ${tile('Responses sent', t.responded, t.received ? `${Math.round(t.responded / t.received * 100)}% of leads` : 'No leads yet', { log: true })}
+  ${tile('Failed or held', t.failed + t.held, `${t.failed} failed · ${t.held} held`, { s: t.failed ? 'failed' : 'held' })}
+  ${tile('Average response', secs(t.avg_seconds), 'From lead in to reply sent', { log: true })}
+  ${tile(`Under ${mon.fastSeconds} seconds`, under == null ? '–' : under + '%', under == null ? 'No replies yet' : `${t.fast} of ${t.responded} replies`, { log: true })}
+ </div>
+ <section class="panel"><h2>Dealerships</h2><div class="tablewrap"><table><thead><tr><th>Dealership</th><th>Mode</th><th>Google</th><th class="num">Received</th><th class="num">Responded</th><th class="num">Failed</th><th class="num">Avg response</th><th>Last lead</th></tr></thead><tbody>
+  ${mon.dealers.length ? mon.dealers.map(d => { const a = ago(d.last_lead); return `<tr class="click" tabindex="0" data-drill="${dj({ d: d.id })}"><td>${esc(d.name)}</td><td>${d.test_mode ? '<span class="chip test">Test</span>' : '<span class="chip replied">Live</span>'}</td><td>${googleChip(d.google_status)}</td><td class="num tnum">${d.received}</td><td class="num tnum">${d.responded}</td><td class="num tnum">${d.failed ? `<span class="chip failed">${d.failed}</span>` : 0}</td><td class="num tnum">${secs(d.avg_seconds)}</td><td>${a.quiet ? `<span class="chip fallback" title="No lead in the last 24 hours. Check the mailbox connection.">⚠ ${esc(a.text)}</span>` : esc(a.text)}</td></tr>`; }).join('') : '<tr><td colspan="8" class="empty">No active dealerships.</td></tr>'}
+ </tbody></table></div></section>
+ <div class="cols2">
+  <section class="panel"><h2>By lead type</h2>${typeChart(mon.types)}</section>
+  <section class="panel"><h2>Leads by hour</h2>${hourChart(mon.hours, mon.fastSeconds)}</section>
+ </div>
+ <section class="panel"><h2>Latest activity</h2>${mon.activity.length ? `<ol class="time act">${mon.activity.map(e => `<li class="${esc(e.severity)} click" tabindex="0" data-go="lead-${e.lead_id}"><time>${dayOf(new Date(e.at)) === dayOf(new Date()) ? '' : dayOf(new Date(e.at)) + ', '}${timeOf(new Date(e.at))}</time><span><b>${esc(e.dealer)}</b> · ${esc(e.first_name || 'Customer')} · ${esc(e.message)}</span></li>`).join('')}</ol>` : '<div class="empty">Nothing yet. Activity shows up here as leads arrive.</div>'}</section>`;
+}
+// One tooltip for every chart mark: follows the pointer, also shown on keyboard focus.
+function bindTips(root) {
+  let tip = $('#tip'); if (!tip) { tip = document.createElement('div'); tip.id = 'tip'; tip.className = 'tip'; tip.hidden = true; document.body.append(tip); }
+  root.querySelectorAll('[data-tip]').forEach(el => {
+    const show = (x, y) => { tip.textContent = el.dataset.tip; tip.hidden = false; const w = tip.offsetWidth; tip.style.left = Math.min(x + 12, innerWidth - w - 8) + 'px'; tip.style.top = (y + 14) + 'px'; };
+    el.onmousemove = e => show(e.clientX, e.clientY);
+    el.onmouseleave = el.onblur = () => { tip.hidden = true; };
+    el.onfocus = () => { const r = el.getBoundingClientRect(); show(r.left, r.bottom - 10); };
+  });
+}
+
 /* ---------- router + events ---------- */
 function router() {
-  const h = location.hash.slice(1) || 'leads'; let route = h, html = '';
-  if (h === 'leads') html = viewLeads();
+  const h = location.hash.slice(1) || 'monitor'; let route = h, html = '';
+  if (h === 'monitor') html = viewMonitor();
+  else if (h === 'leads') html = viewLeads();
   else if (/^lead-\d+$/.test(h)) { route = 'leads'; html = viewLead(+h.split('-')[1]); }
   else if (h === 'alerts') html = viewAlerts();
   else if (h === 'dealerships') html = viewDealers();
@@ -315,7 +390,7 @@ function router() {
   else if (h === 'templates') html = viewTemplates();
   else if (h === 'cache') html = viewCache();
   else if (h === 'controls') html = viewControls();
-  else { route = 'leads'; html = viewLeads(); }
+  else { route = 'monitor'; html = viewMonitor(); }
   const held = leads.filter(l => l.status === 'held').length;
   $('#view').innerHTML = (sending ? '' : `<div class="banner">Sending is paused. ${held} lead${held === 1 ? ' is' : 's are'} being held and nobody is being texted. <button class="btn sm" id="resume">Resume sending</button></div>`) + html;
   renderChrome(route); bind(); enhanceSelects($('#view'));
@@ -341,6 +416,10 @@ function bind() {
     fd.onchange = () => { filt.d = fd.value; router(); }; $('#fs').onchange = e => { filt.s = e.target.value; router(); };
     $('#fq').oninput = e => { filt.q = e.target.value; const p = e.target.selectionStart; router(); const q = $('#fq'); q.focus(); q.setSelectionRange(p, p); };
   }
+  v.querySelectorAll('[data-range]').forEach(b => b.onclick = act(async () => { monF.range = b.dataset.range; mon = await loadMonitor(); router(); }));
+  const md = $('#md'); if (md) md.onchange = act(async () => { monF.d = md.value; mon = await loadMonitor(); router(); });
+  v.querySelectorAll('[data-drill]').forEach(e => { const go = () => drill(JSON.parse(e.dataset.drill)); e.onclick = go; e.onkeydown = ev => { if (ev.key === 'Enter') go(); }; });
+  bindTips(v);
   const sim = $('#sim'); if (sim) sim.onclick = act(async () => { await api('POST', '/api/dev/sample-lead'); await refresh(); toast('Sample lead processed'); });
   v.querySelectorAll('[data-resend]').forEach(b => b.onclick = act(async () => { const r = await api('POST', `/api/leads/${b.dataset.resend}/send`); await refresh(); toast(r.status === 'failed' ? 'Reply failed: ' + r.failure : 'Reply sent'); }));
   v.querySelectorAll('[data-dismiss]').forEach(b => b.onclick = act(async () => { await api('POST', `/api/alerts/${b.dataset.dismiss}/dismiss`); await refresh(); toast('Alert dismissed'); }));
@@ -382,5 +461,5 @@ function bind() {
 }
 window.addEventListener('hashchange', router);
 // Live screens update by themselves; forms are left alone so typing isn't lost.
-setInterval(() => { const h = location.hash.slice(1) || 'leads'; if ($('#modal').hidden && ['leads', 'log', 'alerts'].includes(h) && !document.activeElement?.matches('input')) act(refresh)(); }, 10000);
+setInterval(() => { const h = location.hash.slice(1) || 'monitor'; if ($('#modal').hidden && ['monitor', 'leads', 'log', 'alerts'].includes(h) && !document.activeElement?.matches('input')) act(refresh)(); }, 10000);
 act(refresh)();
