@@ -3,6 +3,7 @@ import { ELEAD_SENDER, looksLikeLead, parseElead } from './parseElead.ts';
 import { NON_VEHICLE_TYPES, replySubject } from './replyEmail.ts';
 import { renderTemplate } from './blocks.ts';
 import { templateFor } from '../templates.ts';
+import { conversationFor, recordMessage } from '../conversations.ts';
 import { normalizePhone } from '../sms.ts';
 import { staffText } from './staffText.ts';
 
@@ -250,6 +251,9 @@ export async function answerLead(db: Db, services: Services, leadId: number): Pr
     [lead.id, reply.kind, testMode ? 'test' : 'replied', sentAt, seconds, store.mailbox, to, subject, reply.html, reply.text, photos.length, photoSource],
   );
   await event(db, lead.id, `${testMode ? 'Test mode: reply sent to you only' : 'Reply sent to the CRM passthrough'} in ${seconds.toFixed(1)} seconds`);
+  // The first reply opens the conversation that Claude carries on.
+  const conv = await conversationFor(db, lead.id);
+  await recordMessage(db, conv.id, { direction: 'out', channel: 'email', author: 'app', body: reply.text, sentTo: to });
   await db.query(`UPDATE leads SET state = 'done' WHERE id = $1`, [lead.id]);
 
   await sendTexts(db, services, store, settings, lead, vehicle, seconds, testMode);
@@ -261,7 +265,7 @@ async function sendTexts(db: Db, services: Services, store: any, settings: any, 
     ? settings.owner_test_phone ? [{ to: settings.owner_test_phone, audience: 'staff', body: staffBody }] : []
     : (store.staff_phones as string[]).map((to) => ({ to, audience: 'staff', body: staffBody }));
   if (!testMode && settings.customer_texts && lead.phone) {
-    targets.push({ to: lead.phone, audience: 'customer', body: `Hi ${lead.first_name}, thanks for contacting ${store.name}. Reply STOP to opt out.` });
+    targets.push({ to: lead.phone, audience: 'customer', body: `Hi ${lead.first_name || 'there'}, thanks for contacting ${store.name}! Questions about the ${vehicle || 'vehicle'} or want to set up a test drive? Just reply here. Reply STOP to opt out.` });
   }
   const optedOut = new Set((await db.query('SELECT phone FROM opt_outs')).map((row) => normalizePhone(row.phone)));
   let sent = 0;
@@ -287,6 +291,10 @@ async function sendTexts(db: Db, services: Services, store: any, settings: any, 
       }
     }
     if (status === 'failed') failed += 1;
+    if (target.audience === 'customer' && status === 'sent') {
+      const conv = await conversationFor(db, lead.id);
+      await recordMessage(db, conv.id, { direction: 'out', channel: 'sms', author: 'app', body: target.body, sentTo: to });
+    }
     await db.query(
       'INSERT INTO text_messages (lead_id, recipient, audience, body, status, twilio_sid, failure) VALUES ($1, $2, $3, $4, $5, $6, $7)',
       [lead.id, to || target.to, target.audience, target.body, status, sid, failure],

@@ -15,6 +15,7 @@ import { loginPage } from './pages.ts';
 import { notConnected, simulated } from './services.ts';
 import { lastFour } from './sms.ts';
 import { TWILIO_PATHS, registerTwilio } from './twilioRoutes.ts';
+import { registerConversations } from './conversationRoutes.ts';
 
 const PUBLIC_PATHS = new Set(['/health', '/login', ...TWILIO_PATHS]);
 
@@ -102,7 +103,8 @@ export async function buildApp(
     twilio: config.twilio ? { connected: true, from: lastFour(config.twilio.from) } : { connected: false, from: '' },
     anthropic: config.anthropicKey ? { connected: true, key: lastFour(config.anthropicKey) } : { connected: false, key: '' },
   });
-  registerTwilio(app, db, config.twilio);
+  registerTwilio(app, db, config.twilio, services);
+  registerConversations(app, db, services, !config.production);
 
   app.get('/', async (_request, reply) => reply.type('text/html').send(await publicFile('index.html')));
   app.get('/app.js', async (_request, reply) => reply.type('text/javascript').send(await publicFile('app.js')));

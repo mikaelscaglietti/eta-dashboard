@@ -6,17 +6,18 @@ import { recoverInterrupted, resumeLeads } from './lead/pipeline.ts';
 import type { Services } from './lead/pipeline.ts';
 import { notConnected } from './services.ts';
 import { twilioSender } from './sms.ts';
-import { anthropicGreeting } from './claude.ts';
+import { anthropicAgent, anthropicGreeting } from './claude.ts';
+import type { ConversationServices } from './conversations.ts';
 
 const config = loadConfig(process.env);
 if (!process.env.DATABASE_URL) mkdirSync('.data', { recursive: true });
 const db = await openDb(process.env.DATABASE_URL, '.data/local');
 
 // Each outside service is switched on only once its settings are filled in.
-const services: Services = {
+const services: ConversationServices = {
   ...notConnected,
   ...(config.twilio ? { sendText: twilioSender(config.twilio) } : {}),
-  ...(config.anthropicKey ? { writeGreeting: anthropicGreeting(config.anthropicKey) } : {}),
+  ...(config.anthropicKey ? { writeGreeting: anthropicGreeting(config.anthropicKey), answerCustomer: anthropicAgent(config.anthropicKey) } : {}),
 };
 const app = await buildApp(config, { logger: true, db, services });
 

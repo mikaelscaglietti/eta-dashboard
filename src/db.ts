@@ -104,6 +104,40 @@ CREATE TABLE IF NOT EXISTS email_templates (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS email_templates_one_default ON email_templates (dealership_id) WHERE is_default;
 ALTER TABLE dealerships ADD COLUMN IF NOT EXISTS active_template_id INTEGER;
+-- Conversations with customers after the first reply. Claude answers while
+-- status is 'ai'; 'staff' means a person has taken over; 'closed' is done.
+CREATE TABLE IF NOT EXISTS conversations (
+  id SERIAL PRIMARY KEY,
+  lead_id INTEGER NOT NULL UNIQUE REFERENCES leads(id),
+  dealership_id INTEGER NOT NULL REFERENCES dealerships(id),
+  status TEXT NOT NULL DEFAULT 'ai',
+  handoff_reason TEXT NOT NULL DEFAULT '',
+  unread BOOLEAN NOT NULL DEFAULT FALSE,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS messages (
+  id SERIAL PRIMARY KEY,
+  conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+  direction TEXT NOT NULL,          -- 'in' from the customer, 'out' to the customer
+  channel TEXT NOT NULL,            -- 'sms' or 'email'
+  author TEXT NOT NULL,             -- 'customer', 'ai', 'staff', or 'app'
+  body TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'sent',
+  sent_to TEXT NOT NULL DEFAULT '',
+  at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS messages_by_conversation ON messages (conversation_id, id);
+-- Test drives and visits a customer set by text or email. The AI accepts them
+-- and staff are told at once.
+CREATE TABLE IF NOT EXISTS appointments (
+  id SERIAL PRIMARY KEY,
+  lead_id INTEGER NOT NULL REFERENCES leads(id),
+  dealership_id INTEGER NOT NULL REFERENCES dealerships(id),
+  kind TEXT NOT NULL DEFAULT 'test drive',
+  when_text TEXT NOT NULL,
+  starts_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 -- Added for Twilio: its message ID links delivery updates back to the text.
 ALTER TABLE text_messages ADD COLUMN IF NOT EXISTS twilio_sid TEXT NOT NULL DEFAULT '';
 ALTER TABLE text_messages ADD COLUMN IF NOT EXISTS failure TEXT NOT NULL DEFAULT '';
@@ -146,6 +180,8 @@ CREATE TABLE IF NOT EXISTS settings (
   sends_per_minute INTEGER NOT NULL DEFAULT 30
 );
 INSERT INTO settings (id) VALUES (1) ON CONFLICT DO NOTHING;
+-- Claude answers customers' replies when this is on (and the key is set).
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS ai_conversations BOOLEAN NOT NULL DEFAULT TRUE;
 -- Conversational replies use Claude Haiku 5.5 only (owner's decision).
 UPDATE settings SET model_provider = 'Anthropic', model_id = 'claude-haiku-5-5' WHERE model_id <> 'claude-haiku-5-5' OR model_provider <> 'Anthropic';
 `;

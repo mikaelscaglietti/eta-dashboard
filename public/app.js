@@ -6,6 +6,7 @@ const statusLabel = { replied: 'Replied', fallback: 'Replied (fallback)', failed
 
 let dealers = [], tplList = [], leads = [], alerts = [], cache = [], settings = {}, dev = false, sending = true, conns = { twilio: { connected: false, from: '' } };
 let mon = null, monF = { range: 'today', d: 'all' };
+let convs = [], thread = null, convDraft = { body: '', channel: 'sms', sim: '', simChannel: 'sms' };
 let deactOpen = false; try { deactOpen = localStorage.getItem('deactOpen') === '1'; } catch {}
 let filt = { d: 'all', s: 'all', q: '' }, logF = { q: '', d: 'all', t: 'all' }, tplSel = null, cacheQ = '', fold = { safety: true, ai: false, conn: true, tstyle: false }, pvList = [];
 
@@ -25,8 +26,9 @@ const dayOf = date => new Intl.DateTimeFormat('en-US', { timeZone: ZONE, month: 
 const timeOf = date => new Intl.DateTimeFormat('en-US', { timeZone: ZONE, hour: 'numeric', minute: '2-digit' }).format(date);
 
 async function load() {
-  const [s, m] = await Promise.all([api('GET', '/api/state'), loadMonitor()]);
-  mon = m;
+  const [s, m, c] = await Promise.all([api('GET', '/api/state'), loadMonitor(), api('GET', '/api/conversations')]);
+  mon = m; convs = c;
+  const ct = (location.hash.match(/^#conversation-(\d+)$/) || [])[1]; if (ct) { thread = await api('GET', '/api/conversations/' + ct); const cc = convs.find(x => x.id === +ct); if (cc) cc.unread = false; }
   settings = s.settings; sending = s.settings.sending; dev = s.dev; conns = s.connections || conns; cache = s.cache.map(c => ({ ...c, when: `${dayOf(new Date(c.last_scraped))}, ${timeOf(new Date(c.last_scraped))}` }));
   alerts = s.alerts.map(a => ({ ...a, sev: a.severity }));
   dealers = s.dealers.map(d => ({ id: d.id, name: d.name, mailbox: d.mailbox, passthrough: d.passthrough, site: d.website, staff: d.staff_phones, active: d.active, test: d.test_mode, sales: d.sales_phone, service: d.service_phone, address: d.address, google: d.google_status, crm: d.crm, activeTpl: d.active_template_id, textFormat: d.staff_text_format || 'formatted' }));
@@ -60,7 +62,7 @@ const options = (list, current) => list.map(([v, l]) => `<option value="${esc(v)
 function renderChrome(route) {
   const open = alerts.length;
   if (route === 'deactivated') deactOpen = true;
-  const link = ([k, l, s]) => `<a href="#${k}" ${s ? `class="subnav" id="sub-${k}" ${deactOpen ? '' : 'hidden'}` : ''} ${route === k ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${icons[k] || ''}</svg>${l}${k === 'alerts' && open ? `<span class="badge">${open}</span>` : ''}</a>`;
+  const link = ([k, l, s]) => `<a href="#${k}" ${s ? `class="subnav" id="sub-${k}" ${deactOpen ? '' : 'hidden'}` : ''} ${route === k ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${icons[k] || ''}</svg>${l}${k === 'alerts' && open ? `<span class="badge">${open}</span>` : ''}${k === 'conversations' && convs.some(c => c.unread) ? `<span class="badge" title="Unread customer messages">${convs.filter(c => c.unread).length}</span>` : ''}</a>`;
   // Dealerships carries an arrow that shows or hides Deactivated underneath it.
   const item = it => it[0] !== 'dealerships' ? link(it) : `<div class="navrow">${link(it)}<button class="navtoggle" id="deacttoggle" aria-expanded="${deactOpen}" aria-controls="sub-deactivated" aria-label="${deactOpen ? 'Hide' : 'Show'} deactivated dealerships" title="${deactOpen ? 'Hide' : 'Show'} deactivated dealerships"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button></div>`;
   $('#nav').innerHTML = navGroups.map(([title, items]) => `<div class="navgroup" role="group" aria-label="${title}"><span class="navhead">${title}</span>${items.map(item).join('')}</div>`).join('');
@@ -130,8 +132,42 @@ function viewLog() {
  <div class="tablewrap"><table style="min-width:1120px"><thead><tr><th>Received</th><th>Dealership</th><th>Customer</th><th>Vehicle</th><th>VIN</th><th>Lead type</th><th>Lead ID</th><th>Status</th><th>Response time</th><th></th></tr></thead><tbody id="logbody"></tbody></table><div id="logempty"></div></div>
  <p class="muted" style="margin-top:12px">The dealership list shows active stores only. Choosing “All dealerships” also includes past responses from stores that are now off.</p>`;
 }
+/* ---------- conversations ---------- */
+const CONV_STATUS = { ai: ['Claude', 'replied'], staff: ['Needs a person', 'fallback'], closed: ['Closed', 'off'] };
+const HANDOFF = { pricing: 'Asked about price, payments or trade-in', asks_for_person: 'Asked for a person', not_found: 'Asked something the website doesn’t answer', off_topic: 'Asked about something else', other: 'Needs a person' };
+const AUTHOR = { customer: 'Customer', ai: 'Claude', staff: 'Staff', app: 'First reply' };
+const custName = c => [c.first_name, c.last_name].filter(Boolean).join(' ') || 'Customer';
+const whenOf = at => { const d = new Date(at); return `${dayOf(d) === dayOf(new Date()) ? '' : dayOf(d) + ', '}${timeOf(d)}`; };
+function convList(activeId) {
+  if (!convs.length) return '<div class="empty">No conversations yet. Each lead’s first reply starts one, and customer replies show up here.</div>';
+  return `<ul class="convlist">${convs.map(c => `<li class="${c.id === activeId ? 'on' : ''}" data-go="conversation-${c.id}" tabindex="0" role="link">
+   <div class="cl1"><b>${esc(custName(c))}</b>${c.unread ? '<span class="dot" aria-label="Unread"></span>' : ''}<time>${whenOf(c.updated_at)}</time></div>
+   <div class="cl2">${esc(c.dealer)} · ${esc([c.year, c.make, c.model].filter(Boolean).join(' ') || 'Vehicle not given')}</div>
+   <div class="cl3"><span class="chip ${CONV_STATUS[c.status][1]}">${CONV_STATUS[c.status][0]}</span>${c.appointment ? `<span class="chip test">${esc(c.appointment)}</span>` : ''}<span class="snip">${c.last_direction === 'in' ? '' : 'You: '}${esc((c.last_body || '').slice(0, 80))}</span></div></li>`).join('')}</ul>`;
+}
 function viewConversations() {
-  return `<h1>Conversations</h1><p class="sub">Back-and-forth with customers after the first reply.</p><div class="panel"><div class="empty">Not built yet. Customer replies will show here once the Gmail connection is set up and this screen is designed.</div></div>`;
+  const open = convs.filter(c => c.status === 'staff').length;
+  return `<div class="head"><div><h1>Conversations</h1><p class="sub">Claude answers customers by text and email. Step in any time; it stops answering when you do.</p></div></div>
+ ${open ? `<div class="demo">${open} conversation${open === 1 ? ' needs' : 's need'} a person.</div>` : ''}
+ <div class="convcols"><section class="panel" style="padding:0">${convList()}</section><section class="panel"><div class="empty">Choose a conversation to read it.</div></section></div>`;
+}
+function viewThread(id) {
+  if (!thread || thread.id !== id) { act(async () => { thread = await api('GET', '/api/conversations/' + id); const cc = convs.find(x => x.id === id); if (cc) cc.unread = false; router(); })(); return '<h1>Conversations</h1><div class="empty">Loading…</div>'; }
+  const c = convs.find(x => x.id === id) || {}, t = thread, st = CONV_STATUS[t.status];
+  const vehicle = [c.year, c.make, c.model, c.trim].filter(Boolean).join(' ');
+  return `<a class="back" href="#conversations">All conversations</a>
+ <div class="convcols"><section class="panel convside" style="padding:0">${convList(id)}</section>
+ <section class="panel thread"><div class="thead"><div><h2>${esc(custName(c))} <span class="chip ${st[1]}">${st[0]}</span>${c.test_mode ? ' <span class="chip test">Test mode</span>' : ''}</h2>
+   <p class="muted small">${esc(c.dealer || '')} · ${esc(vehicle || 'Vehicle not given')}${c.phone ? ` · ${esc(c.phone)}` : ''}${c.email ? ` · ${esc(c.email)}` : ''} · <a href="#lead-${t.lead_id}">Lead</a></p></div>
+   <div class="acts">${t.status === 'ai' ? '<button class="btn sm" data-cstatus="staff">Take over</button>' : '<button class="btn sm" data-cstatus="ai">Hand back to Claude</button>'}${t.status !== 'closed' ? '<button class="btn sm" data-cstatus="closed">Close</button>' : ''}</div></div>
+  ${t.status === 'staff' && t.handoff_reason ? `<div class="banner" style="background:var(--warn-bg);color:var(--warn);border-color:var(--warn)">${esc(HANDOFF[t.handoff_reason] || 'Needs a person')}. Claude has stopped answering this customer. Reply below, or hand it back.</div>` : ''}
+  ${t.appointments.length ? `<div class="appts">${t.appointments.map(a => `<span class="chip test">${esc(a.kind)}: ${esc(a.when_text)}</span>`).join('')}</div>` : ''}
+  <ol class="msgs">${t.messages.map(m => `<li class="${m.direction}">${m.body.length > 320 ? `<details class="bub long"><summary>${esc(m.body.slice(0, 220).replace(/\s+/g, ' '))}… <u>Show all</u></summary>${esc(m.body).replace(/\n/g, '<br>')}</details>` : `<div class="bub">${esc(m.body).replace(/\n/g, '<br>')}</div>`}<small>${AUTHOR[m.author] || m.author} · ${m.channel === 'sms' ? 'Text' : 'Email'} · ${whenOf(m.at)}${m.direction === 'out' && m.sent_to ? ` · to ${esc(m.sent_to)}` : ''}</small></li>`).join('') || '<li class="empty">No messages yet.</li>'}</ol>
+  <div class="compose"><label for="cbody">Reply as staff</label><textarea id="cbody" placeholder="Write to ${esc(c.first_name || 'the customer')}…">${esc(convDraft.body)}</textarea>
+   <div class="inl"><select id="cchan" aria-label="Send by">${options([['sms', 'Text'], ['email', 'Email']], convDraft.channel)}</select><button class="btn primary" id="csend">Send</button></div>
+   <small class="muted">Sending takes the conversation over from Claude.${c.test_mode ? ' Test mode: it goes to your test phone or inbox only.' : ''}</small></div>
+  ${dev ? `<details class="simbox"><summary>Try it: pretend the customer wrote back</summary><textarea id="simbody" placeholder="Is it available in white? Can I come Saturday at 2?">${esc(convDraft.sim)}</textarea><div class="inl"><select id="simchan" aria-label="Customer wrote by">${options([['sms', 'Text'], ['email', 'Email']], convDraft.simChannel)}</select><button class="btn" id="simsend">Send as customer</button></div><small class="muted">Runs the real steps on this computer. Claude answers only when the Anthropic key is set.</small></details>` : ''}
+ </section></div>`;
 }
 function viewAlerts() {
   return `<h1>Alerts</h1><p class="sub">Only problems to fix. Today’s numbers are on the Monitor.</p><div class="panel" style="padding:0">${alerts.length ? alerts.map(a => `<div class="alert"><span class="chip ${esc(a.sev)}">${a.sev === 'failed' ? 'Needs fixing' : 'Check'}</span><div><b>${esc(a.title)}</b><p>${esc(a.body)}</p></div><a class="btn sm" href="${esc(a.link)}" style="text-decoration:none;color:inherit">${esc(a.cta)}</a><button class="btn sm" data-dismiss="${a.id}">Dismiss</button></div>`).join('') : '<div class="empty">All clear. New problems will show up here.</div>'}</div>`;
@@ -315,6 +351,7 @@ function viewControls() {
    </div>
   </details>
   <details class="panel fold" data-fold="ai" ${fold.ai ? 'open' : ''}><summary><span>Conversational replies</span>${conns.anthropic?.connected ? '<span class="chip replied">Connected</span>' : notYet}<span class="muted">Claude Haiku 5.5</span></summary>
+   <div class="toggle"><div><b>Answer customer replies with Claude</b><small>When customers text or email back, Claude Haiku 5.5 answers using the dealership’s website, accepts test drive times, and hands off to staff for prices, payments, trade-ins, or anything it can’t answer.</small></div>${sw(settings.ai_conversations, 'aiConversations')}</div>
    <div class="toggle"><div><b>Write the greeting with Claude</b><small>Claude Haiku 5.5 writes each reply’s opening line. Off, or if Claude is slow or not connected, every customer gets the standard “Hi {first name},”.</small></div>${sw(settings.model_enabled, 'modelEnabled')}</div>
    <div class="form" style="margin-top:14px;grid-template-columns:1fr">
     <div class="field"><label>Model</label><p class="fixed">Claude Haiku 5.5 by Anthropic</p><small>Model ID: claude-haiku-5-5. Fast and low cost. This is the only model the app uses.</small></div>
@@ -479,6 +516,7 @@ function router() {
   else if (/^lead-\d+$/.test(h)) { route = 'leads'; html = viewLead(+h.split('-')[1]); }
   else if (h === 'alerts') html = viewAlerts();
   else if (h === 'conversations') html = viewConversations();
+  else if (/^conversation-\d+$/.test(h)) { route = 'conversations'; html = viewThread(+h.split('-')[1]); }
   else if (h === 'dealerships') html = viewDealers();
   else if (h === 'dealership-new') { route = 'dealerships'; html = viewDealerNew(); }
   else if (/^dealership-\d+$/.test(h)) { const dd = dealers.find(x => x.id === +h.split('-')[1]); route = dd && !dd.active ? 'deactivated' : 'dealerships'; html = viewDealer(+h.split('-')[1]); }
@@ -570,7 +608,7 @@ function bindTemplates(v) {
   v.querySelectorAll('[data-style]').forEach(el => { const up = () => { const k = el.dataset.style; dr.style[k] = k === 'fontSize' ? +el.value : el.value; const c = el.parentElement.querySelector('code'); if (c) c.textContent = el.value; mark(); }; el.oninput = up; el.onchange = up; });
   act(drawPreview)();
 }
-const saveSettings = over => api('PUT', '/api/settings', { customerTexts: settings.customer_texts, testEmail: $('#s-mail')?.value ?? settings.owner_test_email, testPhone: $('#s-phone')?.value ?? settings.owner_test_phone, modelEnabled: settings.model_enabled, modelTimeout: $('#aito')?.value ?? settings.model_timeout_seconds, photoTimeout: $('#s-photo')?.value ?? settings.photo_timeout_seconds, ...over });
+const saveSettings = over => api('PUT', '/api/settings', { customerTexts: settings.customer_texts, testEmail: $('#s-mail')?.value ?? settings.owner_test_email, testPhone: $('#s-phone')?.value ?? settings.owner_test_phone, modelEnabled: settings.model_enabled, aiConversations: settings.ai_conversations, modelTimeout: $('#aito')?.value ?? settings.model_timeout_seconds, photoTimeout: $('#s-photo')?.value ?? settings.photo_timeout_seconds, ...over });
 
 function bind() {
   const v = $('#view');
@@ -584,6 +622,16 @@ function bind() {
   const md = $('#md'); if (md) md.onchange = act(async () => { monF.d = md.value; mon = await loadMonitor(); router(); });
   v.querySelectorAll('[data-drill]').forEach(e => { const go = () => drill(JSON.parse(e.dataset.drill)); e.onclick = go; e.onkeydown = ev => { if (ev.key === 'Enter') go(); }; });
   bindTips(v);
+  const cb = $('#cbody'); if (cb) {
+    cb.oninput = () => { convDraft.body = cb.value; }; $('#cchan').onchange = e => { convDraft.channel = e.target.value; };
+    $('#csend').onclick = act(async () => { await api('POST', `/api/conversations/${thread.id}/reply`, { body: cb.value, channel: $('#cchan').value }); convDraft.body = ''; thread = null; await refresh(); toast('Sent. You have taken over this conversation.'); });
+    v.querySelectorAll('[data-cstatus]').forEach(b => b.onclick = act(async () => { await api('POST', `/api/conversations/${thread.id}/status`, { status: b.dataset.cstatus }); thread = null; await refresh(); toast({ ai: 'Claude is answering again', staff: 'You have taken over', closed: 'Conversation closed' }[b.dataset.cstatus]); }));
+    const sb = $('#simsend'); if (sb) {
+      $('#simbody').oninput = e => { convDraft.sim = e.target.value; }; $('#simchan').onchange = e => { convDraft.simChannel = e.target.value; };
+      sb.onclick = act(async () => { await api('POST', '/api/dev/customer-reply', { leadId: thread.lead_id, body: $('#simbody').value, channel: $('#simchan').value }); convDraft.sim = ''; thread = null; await refresh(); toast('Customer message received'); });
+    }
+    const ml = v.querySelector('.msgs'); if (ml) ml.scrollTop = ml.scrollHeight;
+  }
   const sim = $('#sim'); if (sim) sim.onclick = act(async () => { await api('POST', '/api/dev/sample-lead'); await refresh(); toast('Sample lead processed'); });
   v.querySelectorAll('[data-resend]').forEach(b => b.onclick = act(async () => { const r = await api('POST', `/api/leads/${b.dataset.resend}/send`); await refresh(); toast(r.status === 'failed' ? 'Reply failed: ' + r.failure : 'Reply sent'); }));
   v.querySelectorAll('[data-dismiss]').forEach(b => b.onclick = act(async () => { await api('POST', `/api/alerts/${b.dataset.dismiss}/dismiss`); await refresh(); toast('Alert dismissed'); }));
@@ -619,5 +667,5 @@ function bind() {
 }
 window.addEventListener('hashchange', router);
 // Live screens update by themselves; forms are left alone so typing isn't lost.
-setInterval(() => { const h = location.hash.slice(1) || 'monitor'; if ($('#modal').hidden && ['monitor', 'leads', 'log', 'alerts'].includes(h) && !document.activeElement?.matches('input')) act(refresh)(); }, 10000);
+setInterval(() => { const h = location.hash.slice(1) || 'monitor'; if ($('#modal').hidden && (['monitor', 'leads', 'log', 'alerts', 'conversations'].includes(h) || /^conversation-\d+$/.test(h)) && !document.activeElement?.matches('input,textarea')) act(refresh)(); }, 10000);
 act(refresh)();

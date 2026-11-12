@@ -312,3 +312,40 @@ ol.time.act time{display:inline}
 .colorf code{font-size:13px;color:var(--muted)}
 
 .fixed{margin:0;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);font-weight:600}
+
+/* conversations */
+.convcols{display:grid;grid-template-columns:minmax(260px,.8fr) minmax(0,1.6fr);gap:16px;align-items:start}
+.convlist{list-style:none;margin:0;padding:0;max-height:calc(100vh - 220px);overflow:auto}
+.convlist li{padding:12px 14px;border-bottom:1px solid var(--line);cursor:pointer;display:flex;flex-direction:column;gap:4px}
+.convlist li:hover{background:var(--bg)}
+.convlist li.on{background:var(--bg);box-shadow:inset 3px 0 0 var(--accent)}
+.cl1{display:flex;align-items:center;gap:8px}
+.cl1 time{margin-left:auto;color:var(--muted);font-size:13px}
+.cl1 .dot{width:8px;height:8px;border-radius:50%;background:var(--accent)}
+.cl2{color:var(--muted);font-size:14px}
+.cl3{display:flex;align-items:center;gap:6px;min-width:0}
+.cl3 .snip{color:var(--muted);font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.thread{display:flex;flex-direction:column;gap:12px;min-width:0}
+.thead{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.thead h2{margin:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.thead .acts{display:flex;gap:8px;flex:none}
+.appts{display:flex;flex-wrap:wrap;gap:6px}
+.msgs{list-style:none;margin:0;padding:4px;display:flex;flex-direction:column;gap:10px;max-height:calc(100vh - 420px);min-height:160px;overflow:auto}
+.msgs li{display:flex;flex-direction:column;max-width:80%}
+.msgs li.in{align-self:flex-start}
+.msgs li.out{align-self:flex-end;align-items:flex-end}
+.msgs .bub{padding:10px 12px;border-radius:12px;background:var(--bg);border:1px solid var(--line);white-space:normal;overflow-wrap:anywhere}
+.msgs li.out .bub{background:var(--info-bg);border-color:transparent}
+.msgs small{color:var(--muted);font-size:12.5px;margin-top:3px}
+.compose{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--line);padding-top:12px}
+.compose label{font-weight:600}
+.compose textarea,.simbox textarea{min-height:80px}
+.simbox{border:1px dashed var(--line);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.simbox summary{cursor:pointer;font-weight:600}
+.simbox[open]{gap:8px}
+.compose textarea,.simbox textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--surface);resize:vertical}
+.compose textarea:focus,.simbox textarea:focus{outline:2px solid var(--accent);outline-offset:0;border-color:transparent}
+.msgs details.bub summary{cursor:pointer;list-style:none}
+.msgs details.bub summary::-webkit-details-marker{display:none}
+.msgs details.bub[open] summary{display:none}
+.msgs details.bub u{color:var(--accent);text-decoration:none;font-weight:600;white-space:nowrap}

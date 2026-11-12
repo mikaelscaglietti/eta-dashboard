@@ -241,10 +241,10 @@ export function registerApi(app: FastifyInstance, db: Db, services: Services, de
     const testPhone = normalizePhone(typedPhone);
     if (typedPhone && !testPhone) return reply.code(400).send({ error: 'Your test phone doesn’t look like a phone number. Use a 10-digit number like 480-555-0100.' });
     await db.query(
-      `UPDATE settings SET customer_texts=$1, owner_test_email=$2, owner_test_phone=$3, model_enabled=$4,
+      `UPDATE settings SET customer_texts=$1, owner_test_email=$2, owner_test_phone=$3, model_enabled=$4, ai_conversations=$9,
          model_provider=$5, model_id=$6, model_timeout_seconds=$7, photo_timeout_seconds=$8`,
       [Boolean(s.customerTexts), String(s.testEmail ?? '').trim(), testPhone, Boolean(s.modelEnabled),
-        MODEL_PROVIDER, MODEL_ID, Math.min(10, Math.max(1, Number(s.modelTimeout) || 3)), Math.min(30, Math.max(1, Number(s.photoTimeout) || 5))],
+        MODEL_PROVIDER, MODEL_ID, Math.min(10, Math.max(1, Number(s.modelTimeout) || 3)), Math.min(30, Math.max(1, Number(s.photoTimeout) || 5)), s.aiConversations !== false],
     );
     return { ok: true };
   });

@@ -3,6 +3,8 @@ import type { Db } from './db.ts';
 import { raiseAlert } from './lead/pipeline.ts';
 import { isGenuineTwilioRequest, normalizePhone, optKeyword } from './sms.ts';
 import type { TwilioSettings } from './sms.ts';
+import { receiveCustomerText } from './conversations.ts';
+import type { ConversationServices } from './conversations.ts';
 
 // The addresses Twilio calls. They can't use the dashboard login, so each
 // request must carry Twilio's signature instead.
@@ -15,7 +17,7 @@ const STEP: Record<string, number> = { accepted: 1, queued: 1, sending: 1, sent:
 // Twilio error 21610: the person has already replied STOP to this sender.
 const UNSUBSCRIBED = '21610';
 
-export function registerTwilio(app: FastifyInstance, db: Db, twilio: TwilioSettings | undefined) {
+export function registerTwilio(app: FastifyInstance, db: Db, twilio: TwilioSettings | undefined, services?: ConversationServices) {
   // Not set up yet: the addresses don't exist, so nothing can be faked.
   if (!twilio) return;
 
@@ -40,6 +42,11 @@ export function registerTwilio(app: FastifyInstance, db: Db, twilio: TwilioSetti
     const keyword = optType === 'stop' || optType === 'start' ? optType : optKeyword(String(params.Body ?? ''));
     if (phone && keyword === 'stop') await optOut(db, phone);
     if (phone && keyword === 'start') await db.query('DELETE FROM opt_outs WHERE phone = $1', [phone]);
+    // Anything else is a customer writing back: Claude answers in the background,
+    // so Twilio gets its acknowledgement at once.
+    if (phone && !keyword && services) {
+      void receiveCustomerText(db, services, phone, String(params.Body ?? '')).catch((error) => request.log.error(error));
+    }
     // Twilio sends the standard STOP/START confirmation itself, so we answer with nothing.
     return reply.type('text/xml').send(EMPTY_TWIML);
   });

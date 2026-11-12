@@ -1,5 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { MODEL_ID } from './model.ts';
+import { runAgent } from './agent.ts';
+import type { AgentContext, AgentTools } from './agent.ts';
 
 // Claude Haiku 5.5 writes the greeting line of each reply. Everything else in
 // the email comes from the template. If Claude is slow, fails, or declines, the
@@ -57,4 +59,11 @@ export function claudeGreeting(create: CreateMessage) {
 export function anthropicGreeting(apiKey: string) {
   const client = new Anthropic({ apiKey, maxRetries: 0, timeout: 10_000 });
   return claudeGreeting((params) => client.messages.create(params));
+}
+
+// Claude answering customers in a conversation. One retry and a 30s ceiling:
+// a customer can wait a few seconds for a text, but not forever.
+export function anthropicAgent(apiKey: string) {
+  const client = new Anthropic({ apiKey, maxRetries: 1, timeout: 30_000 });
+  return (context: AgentContext, tools: AgentTools) => runAgent((params) => client.messages.create(params), context, tools);
 }

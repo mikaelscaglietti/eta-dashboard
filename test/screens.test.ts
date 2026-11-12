@@ -185,6 +185,32 @@ describe('dashboard screens', () => {
     await s.close();
   });
 
+  it('shows conversations, a simulated customer reply, and the take-over buttons', async () => {
+    const s = await openDashboard();
+    await go(s, 'leads');
+    s.w.document.querySelector('#sim').click();
+    await s.settle(); await s.settle();
+    await go(s, 'conversations');
+    await s.settle();
+    expect(s.w.document.querySelector('.convlist').textContent).toContain('Alex Sample');
+    s.w.document.querySelector('.convlist li').click();
+    await s.settle(); await s.settle();
+    expect(s.w.document.querySelector('.msgs').textContent).toContain('Hi Alex,');
+    const sim = s.w.document.querySelector('#simbody');
+    sim.value = 'Can I test drive it Saturday at 2?';
+    sim.dispatchEvent(new s.w.Event('input'));
+    s.w.document.querySelector('#simsend').click();
+    await s.settle(); await s.settle(); await s.settle();
+    // Claude isn't connected in this test, so the customer goes to a person.
+    expect(s.w.document.querySelector('.msgs').textContent).toContain('Can I test drive it Saturday at 2?');
+    expect(s.w.document.querySelector('.thead').textContent).toContain('Needs a person');
+    s.w.document.querySelector('[data-cstatus="ai"]').click();
+    await s.settle(); await s.settle();
+    expect(s.w.document.querySelector('.thead').textContent).toContain('Claude');
+    expect(s.errors).toEqual([]);
+    await s.close();
+  });
+
   it('pauses after a confirmation and shows the banner on every screen', async () => {
     const s = await openDashboard();
     s.w.document.querySelector('#pausebtn').click();
