@@ -137,7 +137,10 @@ describe('dashboard screens', () => {
     s.w.document.querySelector('#sim').click();
     await s.settle(); await s.settle();
     await go(s, 'templates');
+    expect(s.w.document.querySelector('#view tbody').textContent).toContain('Earnhardt Cadillac');
+    s.w.document.querySelector('[data-tdealer]').click();
     await s.settle();
+    expect(s.w.location.hash).toBe('#templates-1');
     const tabs = () => [...s.w.document.querySelectorAll('.tpltab')].map((t: any) => t.textContent.replace(/\s+/g, ' ').trim());
     expect(tabs()).toEqual(['Standard In use Default']);
     expect(s.w.document.querySelector('#tprev').textContent).toContain('Hi Alex,');
@@ -159,6 +162,8 @@ describe('dashboard screens', () => {
     s.w.document.querySelector('#mp').click();
     await s.settle(); await s.settle();
     expect(tabs()).toEqual(['Standard In use Default']);
+    await go(s, 'templates');
+    expect(s.w.document.querySelector('.tpltab')).toBeNull();
     expect(s.errors).toEqual([]);
     await s.close();
   });

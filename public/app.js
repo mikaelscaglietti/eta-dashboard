@@ -187,7 +187,7 @@ const BLOCKS = {
 const SHOW_FOR = [['all', 'Every lead'], ['vehicle', 'Vehicle found'], ['unavailable', 'Vehicle unavailable'], ['service', 'Service & general']];
 const FONTS = ['Arial', 'Helvetica', 'Verdana', 'Tahoma', 'Trebuchet MS', 'Georgia', 'Times New Roman'];
 const PH = [['{first_name}', 'First name'], ['{vehicle}', 'Vehicle'], ['{model}', 'Model'], ['{dealership}', 'Dealership'], ['{vin}', 'VIN'], ['{stock}', 'Stock #']];
-let ed = { dealer: null, id: null, draft: null, dirty: false, sel: null, sample: 'vehicle' };
+let ed = { listing: true, dealer: null, id: null, draft: null, dirty: false, sel: null, sample: 'vehicle' };
 const bid = () => 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 function freshBlock(type) {
   const b = { id: bid(), type, showFor: 'all' };
@@ -246,16 +246,20 @@ function blockSettings(b) {
   return `${f ? f() : ''}${fld('Show this block for', `<select data-k="showFor">${options(SHOW_FOR, b.showFor || 'all')}</select>`)}`;
 }
 function viewTemplates() {
-  const ad = dealers.filter(d => d.active);
+  const ad = dealers.filter(d => d.active).sort((a, b) => a.name.localeCompare(b.name));
   if (!ad.length) return '<h1>Templates</h1><p class="sub">Build the reply email each dealership sends.</p><div class="panel"><div class="empty">Add a dealership first. Its templates appear here.</div></div>';
-  if (!ad.some(d => d.id === ed.dealer)) { ed.dealer = ad[0].id; ed.id = null; }
+  // Step 1: pick a dealership. Step 2: its templates and the editor.
+  if (ed.listing || !ad.some(d => d.id === ed.dealer)) return `<h1>Templates</h1><p class="sub">Choose a dealership to see and edit its reply templates.</p>
+ <div class="tablewrap"><table><thead><tr><th>Dealership</th><th class="num">Templates</th><th>In use</th></tr></thead><tbody>
+ ${ad.map(d => { const ts = dealerTemplates(d.id); const inUse = ts.find(t => t.id === d.activeTpl); return `<tr class="click" tabindex="0" data-tdealer="${d.id}"><td><b>${esc(d.name)}</b></td><td class="num tnum">${ts.length || 1}</td><td>${esc(inUse ? inUse.name : 'Standard')}${d.test ? ' <span class="chip test">Test</span>' : ''}</td></tr>`; }).join('')}
+ </tbody></table></div>`;
   const list = dealerTemplates(ed.dealer), store = dealers.find(d => d.id === ed.dealer);
   if (!list.some(t => t.id === ed.id)) openTemplate((list.find(t => t.id === store.activeTpl) || list[0])?.id);
   const t = list.find(x => x.id === ed.id), dr = ed.draft;
   if (!t || !dr) return '<h1>Templates</h1><div class="empty">Loading…</div>';
   const inUse = store.activeTpl === t.id, st = dr.style;
   const colorF = (k, label) => `<label class="colorf">${label}<span><input type="color" data-style="${k}" value="${esc(st[k])}" aria-label="${label}"><code>${esc(st[k])}</code></span></label>`;
-  return `<div class="head"><div><h1>Templates</h1><p class="sub">Build the reply email from blocks. The preview updates as you work.</p></div><div class="acts">${ed.dirty ? '<span class="chip fallback">Unsaved changes</span>' : ''}<button class="btn primary" id="savetpl">Save template</button></div></div>
+  return `<a class="back" href="#templates">All dealerships</a><div class="head"><div><h1>Templates</h1><p class="sub">${esc(store.name)} · Build the reply email from blocks. The preview updates as you work.</p></div><div class="acts">${ed.dirty ? '<span class="chip fallback">Unsaved changes</span>' : ''}<button class="btn primary" id="savetpl">Save template</button></div></div>
  <div class="filters"><select id="tsel" aria-label="Dealership">${options(ad.map(x => [x.id, x.name]), ed.dealer)}</select></div>
  <section class="panel tplbar"><div class="tpltabs" role="tablist" aria-label="Templates for ${esc(store.name)}">${list.map(x => `<button role="tab" aria-selected="${x.id === t.id}" class="tpltab ${x.id === t.id ? 'on' : ''}" data-tpl="${x.id}">${esc(x.name)}${store.activeTpl === x.id ? ' <span class="chip replied">In use</span>' : ''}${x.is_default ? ' <span class="chip off">Default</span>' : ''}</button>`).join('')}</div>
   <div class="tplacts"><button class="btn sm" id="tplnew">New template</button><button class="btn sm" id="tpldup">Duplicate</button>${inUse ? '' : '<button class="btn sm" id="tpluse">Use for replies</button>'}<button class="btn sm danger" id="tpldel" ${t.is_default ? 'disabled title="The default template can’t be deleted"' : ''}>Delete</button></div>
@@ -471,7 +475,8 @@ function router() {
   else if (/^dealership-\d+$/.test(h)) { const dd = dealers.find(x => x.id === +h.split('-')[1]); route = dd && !dd.active ? 'deactivated' : 'dealerships'; html = viewDealer(+h.split('-')[1]); }
   else if (h === 'deactivated') html = viewDeactivated();
   else if (h === 'log') html = viewLog();
-  else if (h === 'templates') html = viewTemplates();
+  else if (h === 'templates') { ed.listing = true; html = viewTemplates(); }
+  else if (/^templates-\d+$/.test(h)) { route = 'templates'; ed.listing = false; const next = +h.split('-')[1]; if (next !== ed.dealer) { ed.dealer = next; ed.id = null; ed.dirty = false; } html = viewTemplates(); }
   else if (h === 'cache') html = viewCache();
   else if (h === 'controls') html = viewControls();
   else { route = 'monitor'; html = viewMonitor(); }
@@ -502,7 +507,7 @@ function bindTemplates(v) {
   const dr = ed.draft; if (!dr) return;
   const mark = () => { if (!ed.dirty) { ed.dirty = true; const h = v.querySelector('.head .acts'); if (h && !h.querySelector('.chip')) h.insertAdjacentHTML('afterbegin', '<span class="chip fallback">Unsaved changes</span>'); } previewSoon(); };
   const redraw = () => { const y = scrollY; router(); scrollTo(0, y); };
-  $('#tsel').onchange = e => { const next = +e.target.value; e.target.value = ed.dealer; guard(() => { ed.dealer = next; ed.id = null; router(); }); };
+  $('#tsel').onchange = e => { const next = +e.target.value; e.target.value = ed.dealer; guard(() => { ed.dirty = false; location.hash = 'templates-' + next; }); };
   v.querySelectorAll('[data-tpl]').forEach(b => b.onclick = () => guard(() => { openTemplate(+b.dataset.tpl); router(); }));
   $('#tplname').oninput = e => { dr.name = e.target.value; mark(); };
   $('#savetpl').onclick = act(async () => { await api('PUT', '/api/email-templates/' + ed.id, dr); ed.dirty = false; await load(); openTemplate(ed.id); redraw(); toast('Template saved'); });
@@ -586,6 +591,8 @@ function bind() {
   v.querySelectorAll('[data-react]').forEach(b => b.onclick = act(async e => { e.stopPropagation(); await setFlag(+b.dataset.react, { active: true }); toast('Reactivated'); location.hash = 'dealerships'; router(); }));
   const ad = v.querySelector('[data-add]'); if (ad) ad.onclick = () => { location.hash = 'dealership-new'; };
   if ($('#savetpl')) bindTemplates(v);
+  // Picking another dealership with unsaved template changes asks first.
+  v.querySelectorAll('[data-tdealer]').forEach(r => { const go = () => { const id = +r.dataset.tdealer; (id === ed.dealer ? f => f() : guard)(() => { if (id !== ed.dealer) ed.dirty = false; location.hash = 'templates-' + id; }); }; r.onclick = go; r.onkeydown = e => { if (e.key === 'Enter') go(); }; });
   const lq = $('#lq'); if (lq) {
     lq.oninput = e => { logF.q = e.target.value; drawLog(); };
     $('#ld').onchange = e => { logF.d = e.target.value; drawLog(); }; $('#lt').onchange = e => { logF.t = e.target.value; drawLog(); };
