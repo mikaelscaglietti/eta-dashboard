@@ -6,6 +6,7 @@ import { recoverInterrupted, resumeLeads } from './lead/pipeline.ts';
 import type { Services } from './lead/pipeline.ts';
 import { notConnected } from './services.ts';
 import { twilioSender } from './sms.ts';
+import { anthropicGreeting } from './claude.ts';
 
 const config = loadConfig(process.env);
 if (!process.env.DATABASE_URL) mkdirSync('.data', { recursive: true });
@@ -15,6 +16,7 @@ const db = await openDb(process.env.DATABASE_URL, '.data/local');
 const services: Services = {
   ...notConnected,
   ...(config.twilio ? { sendText: twilioSender(config.twilio) } : {}),
+  ...(config.anthropicKey ? { writeGreeting: anthropicGreeting(config.anthropicKey) } : {}),
 };
 const app = await buildApp(config, { logger: true, db, services });
 

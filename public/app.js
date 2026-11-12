@@ -314,8 +314,8 @@ function viewControls() {
     <div class="field"><label for="s-photo">Photo search limit (seconds)</label><input id="s-photo" type="number" min="1" max="30" value="${settings.photo_timeout_seconds}"><small>If photos aren’t found by then, the reply goes out without them.</small></div>
    </div>
   </details>
-  <details class="panel fold" data-fold="ai" ${fold.ai ? 'open' : ''}><summary><span>Conversational replies</span>${notYet}<span class="muted">Claude Haiku 5.5</span></summary>
-   <div class="toggle"><div><b>Write replies with the model</b><small>Off means every customer gets the standard template wording.</small></div>${sw(settings.model_enabled, 'modelEnabled')}</div>
+  <details class="panel fold" data-fold="ai" ${fold.ai ? 'open' : ''}><summary><span>Conversational replies</span>${conns.anthropic?.connected ? '<span class="chip replied">Connected</span>' : notYet}<span class="muted">Claude Haiku 5.5</span></summary>
+   <div class="toggle"><div><b>Write the greeting with Claude</b><small>Claude Haiku 5.5 writes each reply’s opening line. Off, or if Claude is slow or not connected, every customer gets the standard “Hi {first name},”.</small></div>${sw(settings.model_enabled, 'modelEnabled')}</div>
    <div class="form" style="margin-top:14px;grid-template-columns:1fr">
     <div class="field"><label>Model</label><p class="fixed">Claude Haiku 5.5 by Anthropic</p><small>Model ID: claude-haiku-5-5. Fast and low cost. This is the only model the app uses.</small></div>
     <div class="field"><label for="aito">Fallback timeout (seconds)</label><input id="aito" type="number" min="1" max="10" value="${settings.model_timeout_seconds}"><small>If the model hasn’t answered by then, the standard reply goes out instead.</small></div>
@@ -326,7 +326,7 @@ function viewControls() {
    <div class="conn"><div><b>Google Workspace</b><small>${connected} of ${active} active mailboxes connected</small></div>${connected && connected === active ? '<span class="chip replied">Connected</span>' : notYet}</div>
    <div class="conn"><div><b>Twilio</b><small>${conns.twilio.connected ? `Texts send from ${esc(conns.twilio.from)}. STOP and START replies are handled.` : 'Staff texts and STOP handling'}</small></div>${conns.twilio.connected ? '<span class="chip replied">Connected</span>' : notYet}</div>
    <div class="conn"><div><b>Firecrawl</b><small>Photo search by VIN</small></div>${notYet}</div>
-   <div class="conn"><div><b>Anthropic (conversational replies)</b><small>Claude Haiku 5.5 · key not added yet</small></div>${notYet}</div>
+   <div class="conn"><div><b>Anthropic (conversational replies)</b><small>Claude Haiku 5.5 · ${conns.anthropic?.connected ? `key ${esc(conns.anthropic.key)}` : 'key not added yet'}</small></div>${conns.anthropic?.connected ? '<span class="chip replied">Connected</span>' : notYet}</div>
    <p class="muted" style="margin:12px 0 0">Keys live on the server, never on this screen.</p>
   </details>
  </div></div>`;

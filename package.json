@@ -14,6 +14,7 @@
     "setup-login": "node scripts/setup-login.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
     "@electric-sql/pglite": "^0.5.14",
     "@fastify/cookie": "^11.1.5",
     "@fastify/formbody": "^9.0.1",

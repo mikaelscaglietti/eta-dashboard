@@ -100,6 +100,7 @@ export async function buildApp(
   const services = options.services ?? notConnected;
   registerApi(app, db, services, !config.production, {
     twilio: config.twilio ? { connected: true, from: lastFour(config.twilio.from) } : { connected: false, from: '' },
+    anthropic: config.anthropicKey ? { connected: true, key: lastFour(config.anthropicKey) } : { connected: false, key: '' },
   });
   registerTwilio(app, db, config.twilio);
 

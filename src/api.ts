@@ -46,6 +46,7 @@ const SAMPLE_LEAD = { firstName: 'Alex', year: 2027, make: 'Cadillac', model: 'E
 
 export interface Connections {
   twilio: { connected: boolean; from: string };
+  anthropic?: { connected: boolean; key: string };
 }
 
 export function registerApi(app: FastifyInstance, db: Db, services: Services, dev: boolean, connections: Connections = { twilio: { connected: false, from: '' } }) {

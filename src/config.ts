@@ -8,6 +8,8 @@ export interface Config {
   production: boolean;
   // Present only when all Twilio settings are filled in. Until then, no text can leave.
   twilio?: TwilioSettings;
+  // Present only when the Anthropic key is set. Until then the standard greeting is always used.
+  anthropicKey?: string;
 }
 
 const TWILIO_KEYS = ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM', 'PUBLIC_URL'] as const;
@@ -23,6 +25,13 @@ function loadTwilio(env: Record<string, string | undefined>): TwilioSettings | u
   if (!/^(\+\d{8,15}|MG[0-9a-f]{32})$/i.test(from)) throw new Error('TWILIO_FROM should be a phone number like +14805550100 or a Messaging Service ID starting with MG.');
   if (!/^https:\/\/[^/]+/.test(publicUrl)) throw new Error('PUBLIC_URL should be the app’s https address, like https://app.etarsp.com.');
   return { accountSid, authToken, from, publicUrl: publicUrl.replace(/\/+$/, '') };
+}
+
+function loadAnthropicKey(env: Record<string, string | undefined>): string | undefined {
+  const key = env.ANTHROPIC_API_KEY?.trim();
+  if (!key) return undefined;
+  if (!key.startsWith('sk-ant-')) throw new Error('ANTHROPIC_API_KEY should start with sk-ant-. Copy it again from the Claude Console.');
+  return key;
 }
 
 // Refuses to start with missing or weak settings, so a bad deploy fails
@@ -45,5 +54,6 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     port: Number(env.PORT) || 3000,
     production: env.NODE_ENV === 'production',
     twilio: loadTwilio(env),
+    anthropicKey: loadAnthropicKey(env),
   };
 }
