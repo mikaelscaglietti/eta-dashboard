@@ -50,9 +50,10 @@ export interface Connections {
 export function registerApi(app: FastifyInstance, db: Db, services: Services, dev: boolean, connections: Connections = { twilio: { connected: false, from: '' } }) {
   // Everything the screens show, in one request. Keys never appear here.
   app.get('/api/state', async () => {
-    const [dealers, templates, leads, events, texts, alerts, cache, settings] = await Promise.all([
+    // First, so every dealership has its default template before the list is read.
+    const templates = await listTemplates(db);
+    const [dealers, leads, events, texts, alerts, cache, settings] = await Promise.all([
       db.query('SELECT * FROM dealerships ORDER BY name'),
-      listTemplates(db),
       db.query(`SELECT l.*, r.kind, r.status, r.failure, r.seconds, r.from_address, r.to_address, r.subject AS reply_subject,
                   r.html, r.text_body, r.photo_count, r.photo_source
                 FROM leads l LEFT JOIN responses r ON r.lead_id = l.id ORDER BY l.received_at DESC LIMIT 1000`),
