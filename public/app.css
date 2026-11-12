@@ -59,9 +59,9 @@ nav svg{width:20px;height:20px;flex:none}
 nav a[hidden]{display:none}
 .navrow{position:relative}
 .navrow>a{padding-right:46px}
-.navtoggle{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:34px;height:34px;display:grid;place-items:center;border:0;border-radius:6px;background:none;color:var(--side-ink);cursor:pointer}
-.navtoggle:hover{background:var(--side-active);color:#fff}
-.navtoggle svg{width:18px;height:18px;transition:transform .15s}
+.navtoggle{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:34px;height:34px;display:grid;place-items:center;border:0;border-radius:6px;background:none;color:#ff3b30;cursor:pointer}
+.navtoggle:hover{background:var(--side-active);color:#ff6259}
+.navtoggle svg{width:20px;height:20px;stroke-width:2.6;transition:transform .15s}
 .navtoggle[aria-expanded="true"] svg{transform:rotate(180deg)}
 @media (prefers-reduced-motion:reduce){.navtoggle svg{transition:none}}
 .badge{margin-left:auto;background:#e5484d;color:#fff;border-radius:99px;font-size:12px;font-weight:700;padding:0 7px;min-width:20px;text-align:center}
