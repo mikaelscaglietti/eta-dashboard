@@ -169,6 +169,22 @@ describe('dashboard screens', () => {
     await s.close();
   });
 
+  it('conversational replies always use Claude Haiku 5.5, with no way to pick another model', async () => {
+    const s = await openDashboard();
+    await go(s, 'controls');
+    const view = s.w.document.querySelector('#view');
+    expect(view.querySelector('#aiprov')).toBeNull();
+    expect(view.querySelector('#aimodel')).toBeNull();
+    expect(view.textContent).toContain('Claude Haiku 5.5');
+    expect(view.textContent).not.toMatch(/OpenAI|GPT/);
+    // Even a request naming another model leaves Claude Haiku 5.5 in place.
+    await s.w.fetch('/api/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ provider: 'OpenAI', model: 'gpt-5.6-luna', testEmail: '', testPhone: '' }) });
+    const state = await (await s.w.fetch('/api/state')).json();
+    expect([state.settings.model_provider, state.settings.model_id]).toEqual(['Anthropic', 'claude-haiku-5-5']);
+    expect(s.errors).toEqual([]);
+    await s.close();
+  });
+
   it('pauses after a confirmation and shows the banner on every screen', async () => {
     const s = await openDashboard();
     s.w.document.querySelector('#pausebtn').click();

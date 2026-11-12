@@ -6,6 +6,7 @@ import type { Services } from './lead/pipeline.ts';
 import { TemplateError, cleanTemplate, renderTemplate } from './lead/blocks.ts';
 import { createTemplate, deleteTemplate, ensureDefault, listTemplates, saveTemplate, useTemplate } from './templates.ts';
 import { normalizePhone } from './sms.ts';
+import { MODEL_ID, MODEL_PROVIDER } from './model.ts';
 import { RANGES, monitorData } from './monitor.ts';
 import type { Range } from './monitor.ts';
 
@@ -242,7 +243,7 @@ export function registerApi(app: FastifyInstance, db: Db, services: Services, de
       `UPDATE settings SET customer_texts=$1, owner_test_email=$2, owner_test_phone=$3, model_enabled=$4,
          model_provider=$5, model_id=$6, model_timeout_seconds=$7, photo_timeout_seconds=$8`,
       [Boolean(s.customerTexts), String(s.testEmail ?? '').trim(), testPhone, Boolean(s.modelEnabled),
-        s.provider, s.model, Math.min(10, Math.max(1, Number(s.modelTimeout) || 3)), Math.min(30, Math.max(1, Number(s.photoTimeout) || 5))],
+        MODEL_PROVIDER, MODEL_ID, Math.min(10, Math.max(1, Number(s.modelTimeout) || 3)), Math.min(30, Math.max(1, Number(s.photoTimeout) || 5))],
     );
     return { ok: true };
   });

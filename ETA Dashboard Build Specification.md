@@ -137,7 +137,7 @@ Claude Code should choose the exact tables. Store at least this.
 | Text message | Lead, recipient, staff or customer, sent time, delivery status |
 | Vehicle cache entry | VIN, up to 3 photo URLs, last scraped, times reused, expiry |
 | Alert | Dealership, severity, title, details, created, dismissed |
-| Settings | Sending on or off, new stores start in test mode, duplicate blocking, customer texts, model provider, model ID, fallback timeout |
+| Settings | Sending on or off, new stores start in test mode, duplicate blocking, customer texts, conversational replies on or off, fallback timeout |
 
 Security rules for the data:
 
@@ -152,7 +152,7 @@ Security rules for the data:
 | Google Workspace (Gmail API) | Read lead notifications and send replies from each dealership's mailbox | Each dealership has its own unique notification address. Add account runs a real Google sign-in for that address. Disconnect revokes the app's access and empties the mailbox field. Create a Google Cloud project and OAuth client owned by the owner. |
 | Firecrawl | Find vehicle photos by VIN on the dealership website | The owner already has an account. Cache links. |
 | Twilio | Staff and customer texts, STOP handling | SMS compliance is already approved. Verify webhook signatures. |
-| Language model | Optional conversational wording | Provider and model are settings, not code. Start with OpenAI GPT-5.6 Luna and allow switching to Claude. Fallback timeout in seconds. |
+| Language model | Optional conversational wording | Claude Haiku 5.5 (`claude-haiku-5-5`) only, by the owner's decision. No provider or model switching. Fallback timeout in seconds. |
 | CRMs | Receive the reply at the passthrough address | Eight options: DealerSocket, DriveCentric, Elead, Ford Direct, ProMax, R&R, Tekion, VinSolutions. |
 
 Google account rules:
@@ -283,6 +283,6 @@ Ask the owner these before building the part they affect. Do not guess.
 - [ ] **Google project.** Does the owner own the Google Cloud project Emergent used, so its OAuth client can be reused, or is a new one needed?
 - [ ] **Dealership groups.** Some groups list several brands under one name. Can one group have more than one mailbox, and are stores like Earnhardt Cadillac and Earnhardt Chandler Cadillac fully separate?
 - [ ] **Dashboard users.** Is the dashboard for the owner only, or will dealership staff log in and see only their own store?
-- [ ] **Language model.** Confirm GPT-5.6 Luna and check its current model ID and price on OpenAI's site. What exactly should the model write?
+- [x] **Language model.** Claude Haiku 5.5 (`claude-haiku-5-5`). Still open: what exactly should the model write?
 - [ ] **Held leads.** When sending resumes after a pause, should the app reply to held leads or skip them?
 - [ ] **Reactivating a store.** Should a reactivated dealership return in test mode first?

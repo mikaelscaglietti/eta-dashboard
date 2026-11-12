@@ -139,13 +139,15 @@ CREATE TABLE IF NOT EXISTS settings (
   owner_test_email TEXT NOT NULL DEFAULT '',
   owner_test_phone TEXT NOT NULL DEFAULT '',
   model_enabled BOOLEAN NOT NULL DEFAULT FALSE,
-  model_provider TEXT NOT NULL DEFAULT 'OpenAI',
-  model_id TEXT NOT NULL DEFAULT 'gpt-5.6-luna',
+  model_provider TEXT NOT NULL DEFAULT 'Anthropic',
+  model_id TEXT NOT NULL DEFAULT 'claude-haiku-5-5',
   model_timeout_seconds INTEGER NOT NULL DEFAULT 3,
   photo_timeout_seconds INTEGER NOT NULL DEFAULT 5,
   sends_per_minute INTEGER NOT NULL DEFAULT 30
 );
 INSERT INTO settings (id) VALUES (1) ON CONFLICT DO NOTHING;
+-- Conversational replies use Claude Haiku 5.5 only (owner's decision).
+UPDATE settings SET model_provider = 'Anthropic', model_id = 'claude-haiku-5-5' WHERE model_id <> 'claude-haiku-5-5' OR model_provider <> 'Anthropic';
 `;
 
 // On the host this is the real Postgres database. On your computer, with no

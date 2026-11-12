@@ -2,7 +2,6 @@
 const ZONE = 'America/Phoenix';
 const LEAD_TYPES = ['New Vehicle', 'New Vehicle (VIN)', 'Used Vehicle', 'Used Vehicle (CPO)', 'General Inquiry', 'Service', 'OnStar Service'];
 const CRMS = ['DealerSocket', 'DriveCentric', 'Elead', 'Ford Direct', 'ProMax', 'R&R', 'Tekion', 'VinSolutions'];
-const AI_MODELS = { OpenAI: [['gpt-5.6-luna', 'GPT-5.6 Luna (fast, low cost)'], ['gpt-5.6-terra', 'GPT-5.6 Terra (balanced)'], ['gpt-5.6-sol', 'GPT-5.6 Sol (most capable)']], Anthropic: [['claude-haiku-5-5', 'Claude Haiku 5.5 (fast, low cost)'], ['claude-sonnet-5-5', 'Claude Sonnet 5.5 (balanced)'], ['claude-opus-5-5', 'Claude Opus 5.5 (most capable)']] };
 const statusLabel = { replied: 'Replied', fallback: 'Replied (fallback)', failed: 'Failed', test: 'Test mode', held: 'Held (paused)', queued: 'Working' };
 
 let dealers = [], tplList = [], leads = [], alerts = [], cache = [], settings = {}, dev = false, sending = true, conns = { twilio: { connected: false, from: '' } };
@@ -315,11 +314,10 @@ function viewControls() {
     <div class="field"><label for="s-photo">Photo search limit (seconds)</label><input id="s-photo" type="number" min="1" max="30" value="${settings.photo_timeout_seconds}"><small>If photos aren’t found by then, the reply goes out without them.</small></div>
    </div>
   </details>
-  <details class="panel fold" data-fold="ai" ${fold.ai ? 'open' : ''}><summary><span>Conversational replies</span>${notYet}<span class="muted">${esc(settings.model_id)}</span></summary>
+  <details class="panel fold" data-fold="ai" ${fold.ai ? 'open' : ''}><summary><span>Conversational replies</span>${notYet}<span class="muted">Claude Haiku 5.5</span></summary>
    <div class="toggle"><div><b>Write replies with the model</b><small>Off means every customer gets the standard template wording.</small></div>${sw(settings.model_enabled, 'modelEnabled')}</div>
    <div class="form" style="margin-top:14px;grid-template-columns:1fr">
-    <div class="field"><label for="aiprov">Provider</label><select id="aiprov">${options(Object.keys(AI_MODELS).map(p => [p, p]), settings.model_provider)}</select></div>
-    <div class="field"><label for="aimodel">Model</label><select id="aimodel">${options(AI_MODELS[settings.model_provider], settings.model_id)}</select><small>Model ID: ${esc(settings.model_id)}</small></div>
+    <div class="field"><label>Model</label><p class="fixed">Claude Haiku 5.5 by Anthropic</p><small>Model ID: claude-haiku-5-5. Fast and low cost. This is the only model the app uses.</small></div>
     <div class="field"><label for="aito">Fallback timeout (seconds)</label><input id="aito" type="number" min="1" max="10" value="${settings.model_timeout_seconds}"><small>If the model hasn’t answered by then, the standard reply goes out instead.</small></div>
    </div>
   </details>
@@ -328,7 +326,7 @@ function viewControls() {
    <div class="conn"><div><b>Google Workspace</b><small>${connected} of ${active} active mailboxes connected</small></div>${connected && connected === active ? '<span class="chip replied">Connected</span>' : notYet}</div>
    <div class="conn"><div><b>Twilio</b><small>${conns.twilio.connected ? `Texts send from ${esc(conns.twilio.from)}. STOP and START replies are handled.` : 'Staff texts and STOP handling'}</small></div>${conns.twilio.connected ? '<span class="chip replied">Connected</span>' : notYet}</div>
    <div class="conn"><div><b>Firecrawl</b><small>Photo search by VIN</small></div>${notYet}</div>
-   <div class="conn"><div><b>${esc(settings.model_provider)} (conversational replies)</b><small>Key not added yet</small></div>${notYet}</div>
+   <div class="conn"><div><b>Anthropic (conversational replies)</b><small>Claude Haiku 5.5 · key not added yet</small></div>${notYet}</div>
    <p class="muted" style="margin:12px 0 0">Keys live on the server, never on this screen.</p>
   </details>
  </div></div>`;
@@ -572,7 +570,7 @@ function bindTemplates(v) {
   v.querySelectorAll('[data-style]').forEach(el => { const up = () => { const k = el.dataset.style; dr.style[k] = k === 'fontSize' ? +el.value : el.value; const c = el.parentElement.querySelector('code'); if (c) c.textContent = el.value; mark(); }; el.oninput = up; el.onchange = up; });
   act(drawPreview)();
 }
-const saveSettings = over => api('PUT', '/api/settings', { customerTexts: settings.customer_texts, testEmail: $('#s-mail')?.value ?? settings.owner_test_email, testPhone: $('#s-phone')?.value ?? settings.owner_test_phone, modelEnabled: settings.model_enabled, provider: settings.model_provider, model: settings.model_id, modelTimeout: $('#aito')?.value ?? settings.model_timeout_seconds, photoTimeout: $('#s-photo')?.value ?? settings.photo_timeout_seconds, ...over });
+const saveSettings = over => api('PUT', '/api/settings', { customerTexts: settings.customer_texts, testEmail: $('#s-mail')?.value ?? settings.owner_test_email, testPhone: $('#s-phone')?.value ?? settings.owner_test_phone, modelEnabled: settings.model_enabled, modelTimeout: $('#aito')?.value ?? settings.model_timeout_seconds, photoTimeout: $('#s-photo')?.value ?? settings.photo_timeout_seconds, ...over });
 
 function bind() {
   const v = $('#view');
@@ -610,9 +608,7 @@ function bind() {
     drawLog();
   }
   v.querySelectorAll('[data-fold]').forEach(el => { el.ontoggle = () => { fold[el.dataset.fold] = el.open; }; });
-  const ap = $('#aiprov'); if (ap) {
-    ap.onchange = act(async () => { await saveSettings({ provider: ap.value, model: AI_MODELS[ap.value][0][0] }); await refresh(); });
-    $('#aimodel').onchange = act(async e => { await saveSettings({ model: e.target.value }); await refresh(); toast('Model saved'); });
+  if ($('#aito')) {
     ['aito', 's-mail', 's-phone', 's-photo'].forEach(id => { $('#' + id).onchange = act(async () => { await saveSettings({}); await load(); toast('Saved'); }); });
   }
   const cq = $('#cq'); if (cq) cq.oninput = e => { cacheQ = e.target.value; const p = e.target.selectionStart; router(); const q = $('#cq'); q.focus(); q.setSelectionRange(p, p); };
