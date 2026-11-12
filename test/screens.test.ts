@@ -60,6 +60,7 @@ describe('dashboard screens', () => {
     await s.settle();
     expect(s.w.document.querySelector('.count b').textContent).toBe('1');
     expect(s.w.document.querySelector('tbody').textContent).toContain('2027 Cadillac Escalade');
+    expect(s.w.document.querySelector('tbody').textContent).toContain('Alex Sample');
 
     for (const [hash, heading] of screens) {
       await go(s, hash);
