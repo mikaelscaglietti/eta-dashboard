@@ -81,6 +81,23 @@ describe('dashboard screens', () => {
     await s.close();
   });
 
+  it('hides Deactivated under an arrow on Dealerships, and opens it on its own screen', async () => {
+    const s = await openDashboard();
+    const sub = () => s.w.document.querySelector('#sub-deactivated');
+    const toggle = () => s.w.document.querySelector('#deacttoggle');
+    expect(sub().hidden).toBe(true);
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    toggle().click();
+    expect(sub().hidden).toBe(false);
+    expect(toggle().getAttribute('aria-expanded')).toBe('true');
+    toggle().click();
+    expect(sub().hidden).toBe(true);
+    await go(s, 'deactivated');
+    expect(sub().hidden).toBe(false);
+    expect(s.errors).toEqual([]);
+    await s.close();
+  });
+
   it('opens on the Monitor, and its numbers, filters and links work', async () => {
     const s = await openDashboard();
     expect(title(s)).toBe('Monitor');

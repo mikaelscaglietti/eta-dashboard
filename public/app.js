@@ -7,6 +7,7 @@ const statusLabel = { replied: 'Replied', fallback: 'Replied (fallback)', failed
 
 let dealers = [], tpl = {}, leads = [], alerts = [], cache = [], settings = {}, dev = false, sending = true, conns = { twilio: { connected: false, from: '' } };
 let mon = null, monF = { range: 'today', d: 'all' };
+let deactOpen = false; try { deactOpen = localStorage.getItem('deactOpen') === '1'; } catch {}
 let filt = { d: 'all', s: 'all', q: '' }, logF = { q: '', d: 'all', t: 'all' }, tplSel = null, cacheQ = '', fold = { safety: true, ai: false, conn: true }, pvList = [];
 
 const $ = s => document.querySelector(s);
@@ -53,7 +54,11 @@ const options = (list, current) => list.map(([v, l]) => `<option value="${esc(v)
 
 function renderChrome(route) {
   const open = alerts.length;
-  $('#nav').innerHTML = navItems.map(([k, l, s]) => `<a href="#${k}" ${s ? 'class="subnav"' : ''} ${route === k ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${icons[k] || ''}</svg>${l}${k === 'alerts' && open ? `<span class="badge">${open}</span>` : ''}</a>`).join('');
+  if (route === 'deactivated') deactOpen = true;
+  const link = ([k, l, s]) => `<a href="#${k}" ${s ? `class="subnav" id="sub-${k}" ${deactOpen ? '' : 'hidden'}` : ''} ${route === k ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${icons[k] || ''}</svg>${l}${k === 'alerts' && open ? `<span class="badge">${open}</span>` : ''}</a>`;
+  // Dealerships carries an arrow that shows or hides Deactivated underneath it.
+  $('#nav').innerHTML = navItems.map(item => item[0] !== 'dealerships' ? link(item) : `<div class="navrow">${link(item)}<button class="navtoggle" id="deacttoggle" aria-expanded="${deactOpen}" aria-controls="sub-deactivated" aria-label="${deactOpen ? 'Hide' : 'Show'} deactivated dealerships" title="${deactOpen ? 'Hide' : 'Show'} deactivated dealerships"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button></div>`).join('');
+  $('#deacttoggle').onclick = () => { deactOpen = !deactOpen; try { localStorage.setItem('deactOpen', deactOpen ? '1' : ''); } catch {} renderChrome(route); };
   const s = $('#send'); s.className = 'send' + (sending ? '' : ' paused');
   s.innerHTML = `<b><span class="dot"></span>${sending ? 'Live' : 'Paused'}</b><div class="ctl"><button id="pausebtn" class="${sending ? '' : 'on-pause'}" aria-label="Pause all sending" aria-pressed="${!sending}" title="Pause all sending"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg></button><button id="playbtn" class="${sending ? 'on-play' : ''}" aria-label="Resume sending" aria-pressed="${sending}" title="Resume sending"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12-7.5a1 1 0 0 0 0-1.72l-12-7.5A1 1 0 0 0 7 4.5z"/></svg></button></div>`;
   $('#pausebtn').onclick = () => { if (sending) askPause(); };
