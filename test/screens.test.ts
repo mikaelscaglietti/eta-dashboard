@@ -40,14 +40,15 @@ describe('dashboard screens', () => {
   it('shows the menu in the order the spec asks for', async () => {
     const s = await openDashboard();
     const labels = [...s.w.document.querySelectorAll('nav a')].map((a: any) => a.textContent);
-    expect(labels).toEqual(['Monitor', 'Incoming leads', 'Response log', 'Dealerships', 'Deactivated', 'Templates', 'Vehicle cache', 'Settings', 'Alerts']);
+    expect(labels).toEqual(['Monitor', 'Incoming leads', 'Response log', 'Conversations', 'Alerts', 'Dealerships', 'Deactivated', 'Templates', 'Vehicle cache', 'Settings']);
+    expect([...s.w.document.querySelectorAll('.navhead')].map((h: any) => h.textContent)).toEqual(['Daily', 'Setup', 'System']);
     await s.close();
   });
 
   it('opens every screen, empty and with a lead, without errors', async () => {
     const s = await openDashboard();
     const screens: [string, string][] = [
-      ['monitor', 'Monitor'], ['leads', 'Incoming leads'], ['log', 'Response log'], ['dealerships', 'Dealerships'], ['deactivated', 'Deactivated'],
+      ['monitor', 'Monitor'], ['leads', 'Incoming leads'], ['log', 'Response log'], ['conversations', 'Conversations'], ['dealerships', 'Dealerships'], ['deactivated', 'Deactivated'],
       ['dealership-new', 'Add dealership'], ['templates', 'Templates'], ['cache', 'Vehicle cache'], ['controls', 'Settings'], ['alerts', 'Alerts'],
     ];
     for (const [hash, heading] of screens) {

@@ -42,13 +42,19 @@ async function load() {
 
 /* ---------- chrome ---------- */
 const icons = {
-  monitor: '<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>',
+  monitor: '<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>',
+  conversations: '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>',
   leads: '<path d="M3 12h4l3-8 4 16 3-8h4"/>', log: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
   alerts: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21a2 2 0 0 0 4 0"/>', dealerships: '<path d="M3 21V9l9-6 9 6v12"/><path d="M9 21v-6h6v6"/>',
   templates: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m3 8 9 6 9-6"/>', cache: '<rect x="3" y="3" width="18" height="14" rx="2"/><path d="m3 14 5-5 5 5 3-3 5 5"/><path d="M8 21h8"/>',
-  controls: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/>'
+  controls: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>'
 };
-const navItems = [['monitor', 'Monitor'], ['leads', 'Incoming leads'], ['log', 'Response log'], ['dealerships', 'Dealerships'], ['deactivated', 'Deactivated', 'sub'], ['templates', 'Templates'], ['cache', 'Vehicle cache'], ['controls', 'Settings'], ['alerts', 'Alerts']];
+// The left menu, in three groups with a heading each.
+const navGroups = [
+  ['Daily', [['monitor', 'Monitor'], ['leads', 'Incoming leads'], ['log', 'Response log'], ['conversations', 'Conversations'], ['alerts', 'Alerts']]],
+  ['Setup', [['dealerships', 'Dealerships'], ['deactivated', 'Deactivated', 'sub'], ['templates', 'Templates'], ['cache', 'Vehicle cache']]],
+  ['System', [['controls', 'Settings']]],
+];
 const sw = (on, id) => `<button class="sw" role="switch" aria-checked="${on}" data-sw="${id}" aria-label="toggle"></button>`;
 const options = (list, current) => list.map(([v, l]) => `<option value="${esc(v)}" ${String(current) === String(v) ? 'selected' : ''}>${esc(l)}</option>`).join('');
 
@@ -57,7 +63,8 @@ function renderChrome(route) {
   if (route === 'deactivated') deactOpen = true;
   const link = ([k, l, s]) => `<a href="#${k}" ${s ? `class="subnav" id="sub-${k}" ${deactOpen ? '' : 'hidden'}` : ''} ${route === k ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${icons[k] || ''}</svg>${l}${k === 'alerts' && open ? `<span class="badge">${open}</span>` : ''}</a>`;
   // Dealerships carries an arrow that shows or hides Deactivated underneath it.
-  $('#nav').innerHTML = navItems.map(item => item[0] !== 'dealerships' ? link(item) : `<div class="navrow">${link(item)}<button class="navtoggle" id="deacttoggle" aria-expanded="${deactOpen}" aria-controls="sub-deactivated" aria-label="${deactOpen ? 'Hide' : 'Show'} deactivated dealerships" title="${deactOpen ? 'Hide' : 'Show'} deactivated dealerships"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button></div>`).join('');
+  const item = it => it[0] !== 'dealerships' ? link(it) : `<div class="navrow">${link(it)}<button class="navtoggle" id="deacttoggle" aria-expanded="${deactOpen}" aria-controls="sub-deactivated" aria-label="${deactOpen ? 'Hide' : 'Show'} deactivated dealerships" title="${deactOpen ? 'Hide' : 'Show'} deactivated dealerships"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button></div>`;
+  $('#nav').innerHTML = navGroups.map(([title, items]) => `<div class="navgroup" role="group" aria-label="${title}"><span class="navhead">${title}</span>${items.map(item).join('')}</div>`).join('');
   $('#deacttoggle').onclick = () => { deactOpen = !deactOpen; try { localStorage.setItem('deactOpen', deactOpen ? '1' : ''); } catch {} renderChrome(route); };
   const s = $('#send'); s.className = 'send' + (sending ? '' : ' paused');
   s.innerHTML = `<b><span class="dot"></span>${sending ? 'Live' : 'Paused'}</b><div class="ctl"><button id="pausebtn" class="${sending ? '' : 'on-pause'}" aria-label="Pause all sending" aria-pressed="${!sending}" title="Pause all sending"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg></button><button id="playbtn" class="${sending ? 'on-play' : ''}" aria-label="Resume sending" aria-pressed="${sending}" title="Resume sending"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12-7.5a1 1 0 0 0 0-1.72l-12-7.5A1 1 0 0 0 7 4.5z"/></svg></button></div>`;
@@ -123,6 +130,9 @@ function viewLog() {
  <p class="muted" id="logcount" style="margin:0 0 10px"></p>
  <div class="tablewrap"><table style="min-width:1120px"><thead><tr><th>Received</th><th>Dealership</th><th>Customer</th><th>Vehicle</th><th>VIN</th><th>Lead type</th><th>Lead ID</th><th>Status</th><th>Response time</th><th></th></tr></thead><tbody id="logbody"></tbody></table><div id="logempty"></div></div>
  <p class="muted" style="margin-top:12px">The dealership list shows active stores only. Choosing “All dealerships” also includes past responses from stores that are now off.</p>`;
+}
+function viewConversations() {
+  return `<h1>Conversations</h1><p class="sub">Back-and-forth with customers after the first reply.</p><div class="panel"><div class="empty">Not built yet. Customer replies will show here once the Gmail connection is set up and this screen is designed.</div></div>`;
 }
 function viewAlerts() {
   return `<h1>Alerts</h1><p class="sub">Only problems to fix. Today’s numbers are on the Monitor.</p><div class="panel" style="padding:0">${alerts.length ? alerts.map(a => `<div class="alert"><span class="chip ${esc(a.sev)}">${a.sev === 'failed' ? 'Needs fixing' : 'Check'}</span><div><b>${esc(a.title)}</b><p>${esc(a.body)}</p></div><a class="btn sm" href="${esc(a.link)}" style="text-decoration:none;color:inherit">${esc(a.cta)}</a><button class="btn sm" data-dismiss="${a.id}">Dismiss</button></div>`).join('') : '<div class="empty">All clear. New problems will show up here.</div>'}</div>`;
@@ -470,6 +480,7 @@ function router() {
   else if (h === 'leads') html = viewLeads();
   else if (/^lead-\d+$/.test(h)) { route = 'leads'; html = viewLead(+h.split('-')[1]); }
   else if (h === 'alerts') html = viewAlerts();
+  else if (h === 'conversations') html = viewConversations();
   else if (h === 'dealerships') html = viewDealers();
   else if (h === 'dealership-new') { route = 'dealerships'; html = viewDealerNew(); }
   else if (/^dealership-\d+$/.test(h)) { const dd = dealers.find(x => x.id === +h.split('-')[1]); route = dd && !dd.active ? 'deactivated' : 'dealerships'; html = viewDealer(+h.split('-')[1]); }

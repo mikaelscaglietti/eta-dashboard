@@ -49,7 +49,10 @@ a{color:var(--accent)}
 .send .ctl button svg{width:18px;height:18px}
 .send .ctl button.on-pause{border-color:#f87171;background:rgba(229,72,77,.3);color:#fff;box-shadow:0 0 14px 2px rgba(248,113,113,.55)}
 .send .ctl button.on-play{border-color:#3ecf8e;background:rgba(62,207,142,.24);color:#fff;box-shadow:0 0 14px 2px rgba(62,207,142,.5)}
-nav{display:flex;flex-direction:column;gap:8px}
+nav{display:flex;flex-direction:column;gap:0}
+.navgroup{display:flex;flex-direction:column;gap:4px;padding:14px 0;border-top:1px solid #2a3547}
+.navgroup:first-child{border-top:0;padding-top:4px}
+.navhead{padding:0 12px 6px;font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#7f8aa0}
 nav a{display:flex;align-items:center;gap:11px;padding:12px 12px;border-radius:8px;color:var(--side-ink);text-decoration:none;font-weight:600;font-size:17px;letter-spacing:.05em;text-transform:uppercase}
 nav a:hover{background:var(--side-active);color:#fff}
 nav a.subnav{padding:8px 12px 8px 44px;font-size:15px;margin-top:-4px}
